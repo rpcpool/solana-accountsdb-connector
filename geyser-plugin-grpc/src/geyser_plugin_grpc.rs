@@ -187,8 +187,8 @@ impl GeyserPlugin for Plugin {
         let server_broadcast = service.sender.clone();
 
         let server = geyser_proto::accounts_db_server::AccountsDbServer::new(service)
-              .accept_gzip()
-              .send_gzip();
+            .accept_gzip()
+            .send_gzip();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.spawn(Server::builder().add_service(server).serve_with_shutdown(
             addr,
@@ -248,7 +248,10 @@ impl GeyserPlugin for Plugin {
     ) -> PluginResult<()> {
         let data = self.data.as_ref().expect("plugin must be initialized");
         match account {
-            ReplicaAccountInfoVersions::V0_0_1(account) => {
+            ReplicaAccountInfoVersions::V0_0_1(_account) => {
+                warn!("Unxpected account info version: V0_0_1");
+            }
+            ReplicaAccountInfoVersions::V0_0_2(account) => {
                 if account.pubkey.len() != 32 {
                     error!(
                         "bad account pubkey length: {}",
