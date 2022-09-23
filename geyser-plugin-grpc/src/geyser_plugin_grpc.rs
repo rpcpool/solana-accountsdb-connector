@@ -1,5 +1,9 @@
 use {
-    crate::accounts_selector::AccountsSelector,
+    crate::{
+        accounts_selector::AccountsSelector, ACCOUNT_UPDATE, ACCOUNT_UPDATE_COUNTER,
+        ACCOUNT_UPDATE_HISTOGRAM, END_OF_STARTUP, ONLOAD_COUNTER, ONLOAD_HISTOGRAM, SLOT_UPDATE,
+        SLOT_UPDATE_COUNTER, SLOT_UPDATE_HISTOGRAM, UNLOAD_COUNTER, UNLOAD_HISTOGRAM,
+    },
     bs58,
     geyser_proto::{
         slot_update::Status as SlotUpdateStatus, update::UpdateOneof, AccountWrite, Ping,
@@ -148,6 +152,9 @@ impl GeyserPlugin for Plugin {
     }
 
     fn on_load(&mut self, config_file: &str) -> PluginResult<()> {
+        ONLOAD_COUNTER.inc();
+        let timer = ONLOAD_HISTOGRAM.with_label_values(&["all"]).start_timer();
+
         solana_logger::setup_with_default("info");
         info!(
             "Loading plugin {:?} from config_file {:?}",
@@ -218,11 +225,16 @@ impl GeyserPlugin for Plugin {
             active_accounts: RwLock::new(HashSet::new()),
         });
 
+        timer.observe_duration();
+
         Ok(())
     }
 
     fn on_unload(&mut self) {
         info!("Unloading plugin: {:?}", self.name());
+
+        UNLOAD_COUNTER.inc();
+        let timer = UNLOAD_HISTOGRAM.with_label_values(&["all"]).start_timer();
 
         let mut data = self.data.take().expect("plugin must be initialized");
         data.server_exit_sender
@@ -235,6 +247,8 @@ impl GeyserPlugin for Plugin {
             .take()
             .expect("must exist")
             .shutdown_background();
+
+        timer.observe_duration();
     }
 
     fn update_account(
@@ -243,6 +257,11 @@ impl GeyserPlugin for Plugin {
         slot: u64,
         is_startup: bool,
     ) -> PluginResult<()> {
+        ACCOUNT_UPDATE_COUNTER.inc();
+        let timer = ACCOUNT_UPDATE_HISTOGRAM
+            .with_label_values(&["all"])
+            .start_timer();
+
         let data = self.data.as_ref().expect("plugin must be initialized");
         match account {
             ReplicaAccountInfoVersions::V0_0_1(account) => {
@@ -253,6 +272,8 @@ impl GeyserPlugin for Plugin {
                     );
                     return Ok(());
                 }
+
+                ACCOUNT_UPDATE.with_label_values(&[&bs58::encode(account.pubkey).into_string()]);
 
                 // Select only accounts configured to look at, plus writes to accounts
                 // that were previously selected (to catch closures and account reuse)
@@ -296,6 +317,9 @@ impl GeyserPlugin for Plugin {
                 }));
             }
         }
+
+        timer.observe_duration();
+
         Ok(())
     }
 
@@ -305,6 +329,13 @@ impl GeyserPlugin for Plugin {
         parent: Option<u64>,
         status: SlotStatus,
     ) -> PluginResult<()> {
+        SLOT_UPDATE_COUNTER.inc();
+        let timer = SLOT_UPDATE_HISTOGRAM
+            .with_label_values(&["all"])
+            .start_timer();
+
+        SLOT_UPDATE.with_label_values(&[&slot.to_string()]);
+
         let data = self.data.as_ref().expect("plugin must be initialized");
         debug!("Updating slot {:?} at with status {:?}", slot, status);
 
@@ -319,10 +350,14 @@ impl GeyserPlugin for Plugin {
             status: status as i32,
         }));
 
+        timer.observe_duration();
+
         Ok(())
     }
 
     fn notify_end_of_startup(&mut self) -> PluginResult<()> {
+        END_OF_STARTUP.inc();
+
         Ok(())
     }
 }

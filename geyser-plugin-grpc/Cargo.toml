@@ -32,6 +32,8 @@ tokio-stream = "0.1"
 
 async-stream = "0.2"
 rand = "0.8"
+prometheus = "0.13.2"
+lazy_static = "1.4.0"
 
 [build-dependencies]
 tonic-build = "0.6"
