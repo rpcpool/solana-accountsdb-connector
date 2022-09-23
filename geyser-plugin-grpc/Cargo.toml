@@ -37,6 +37,9 @@ rand = "0.8"
 zstd = "0.11.2"
 zstd-safe = "5.0.2"
 
+prometheus = "0.13.2"
+lazy_static = "1.4.0"
+
 [build-dependencies]
 tonic-build = { version = "0.6", features = ["compression"] }
 
