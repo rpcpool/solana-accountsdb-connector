@@ -1,8 +1,10 @@
+use lazy_static::lazy_static;
 use {
     crate::{
-        accounts_selector::AccountsSelector, ACCOUNT_UPDATE, ACCOUNT_UPDATE_COUNTER,
-        ACCOUNT_UPDATE_HISTOGRAM, END_OF_STARTUP, ONLOAD_COUNTER, ONLOAD_HISTOGRAM, SLOT_UPDATE,
-        SLOT_UPDATE_COUNTER, SLOT_UPDATE_HISTOGRAM, UNLOAD_COUNTER, UNLOAD_HISTOGRAM,
+        accounts_selector::AccountsSelector, PrometheusConfig, ACCOUNT_UPDATE,
+        ACCOUNT_UPDATE_COUNTER, ACCOUNT_UPDATE_HISTOGRAM, END_OF_STARTUP, ONLOAD_COUNTER,
+        ONLOAD_HISTOGRAM, SLOT_UPDATE, SLOT_UPDATE_COUNTER, SLOT_UPDATE_HISTOGRAM, UNLOAD_COUNTER,
+        UNLOAD_HISTOGRAM,
     },
     bs58,
     geyser_proto::{
@@ -21,9 +23,21 @@ use {
     std::sync::atomic::{AtomicU64, Ordering},
     std::sync::RwLock,
     std::{fs::File, io::Read, sync::Arc},
-    tokio::sync::{broadcast, mpsc},
+    tokio::sync::{
+        broadcast, mpsc,
+        mpsc::{Receiver, Sender},
+        RwLock as TokioRwLock,
+    },
     tonic::transport::Server,
 };
+
+lazy_static! {
+    pub(crate) static ref CHANNEL: (Sender<()>, TokioRwLock<Receiver<()>>) = {
+        let (sender, receiver) = mpsc::channel::<()>(100);
+
+        (sender, TokioRwLock::new(receiver))
+    };
+}
 
 pub mod geyser_proto {
     tonic::include_proto!("accountsdb");
@@ -135,6 +149,7 @@ impl std::fmt::Debug for Plugin {
 pub struct PluginConfig {
     pub bind_address: String,
     pub service_config: geyser_service::ServiceConfig,
+    pub prometheus_config: PrometheusConfig,
 }
 
 impl PluginData {
@@ -178,6 +193,11 @@ impl GeyserPlugin for Plugin {
             }
         })?;
 
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let socket_addr_prometheus = config.prometheus_config.to_socket_addr();
+
+        crate::spawn_metric_thread(&runtime, socket_addr_prometheus);
+
         let addr =
             config
                 .bind_address
@@ -193,7 +213,6 @@ impl GeyserPlugin for Plugin {
         let server_broadcast = service.sender.clone();
 
         let server = geyser_proto::accounts_db_server::AccountsDbServer::new(service);
-        let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.spawn(Server::builder().add_service(server).serve_with_shutdown(
             addr,
             async move {

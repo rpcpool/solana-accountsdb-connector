@@ -34,6 +34,8 @@ async-stream = "0.2"
 rand = "0.8"
 prometheus = "0.13.2"
 lazy_static = "1.4.0"
+hyper = { version = "0.14.20", features = ["server", "http1", "tcp"] }
+tracing = "0.1.36"
 
 [build-dependencies]
 tonic-build = "0.6"
