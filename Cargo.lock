@@ -4770,6 +4770,7 @@ dependencies = [
  "bs58 0.4.0",
  "futures-core",
  "futures-util",
+ "hyper 0.14.20",
  "lazy_static",
  "log 0.4.17",
  "prometheus",
@@ -4786,6 +4787,7 @@ dependencies = [
  "tokio-stream",
  "tonic 0.6.2",
  "tonic-build 0.6.2",
+ "tracing",
  "zstd",
  "zstd-safe",
 ]

@@ -1,9 +1,10 @@
+use lazy_static::lazy_static;
 use {
     crate::{
-        accounts_selector::AccountsSelector, compression::zstd_compress, ACCOUNT_UPDATE,
-        ACCOUNT_UPDATE_COUNTER, ACCOUNT_UPDATE_HISTOGRAM, END_OF_STARTUP, ONLOAD_COUNTER,
-        ONLOAD_HISTOGRAM, SLOT_UPDATE, SLOT_UPDATE_COUNTER, SLOT_UPDATE_HISTOGRAM, UNLOAD_COUNTER,
-        UNLOAD_HISTOGRAM,
+        accounts_selector::AccountsSelector, compression::zstd_compress, PrometheusConfig,
+        ACCOUNT_UPDATE, ACCOUNT_UPDATE_COUNTER, ACCOUNT_UPDATE_HISTOGRAM, END_OF_STARTUP,
+        ONLOAD_COUNTER, ONLOAD_HISTOGRAM, SLOT_UPDATE, SLOT_UPDATE_COUNTER, SLOT_UPDATE_HISTOGRAM,
+        UNLOAD_COUNTER, UNLOAD_HISTOGRAM,
     },
     geyser_proto::{
         slot_update::Status as SlotUpdateStatus, update::UpdateOneof, AccountWrite, Ping,
@@ -26,9 +27,21 @@ use {
             Arc, RwLock,
         },
     },
-    tokio::sync::{broadcast, mpsc},
+    tokio::sync::{
+        broadcast, mpsc,
+        mpsc::{Receiver, Sender},
+        RwLock as TokioRwLock,
+    },
     tonic::transport::Server,
 };
+
+lazy_static! {
+    pub(crate) static ref CHANNEL: (Sender<()>, TokioRwLock<Receiver<()>>) = {
+        let (sender, receiver) = mpsc::channel::<()>(100);
+
+        (sender, TokioRwLock::new(receiver))
+    };
+}
 
 pub mod geyser_proto {
     tonic::include_proto!("accountsdb");
@@ -172,6 +185,7 @@ pub struct PluginConfig {
     pub bind_address: String,
     pub service_config: geyser_service::ServiceConfig,
     pub zstd_compression: bool,
+    pub prometheus_config: PrometheusConfig,
 }
 
 impl PluginData {
@@ -216,6 +230,11 @@ impl GeyserPlugin for Plugin {
                 ),
             }
         })?;
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let socket_addr_prometheus = config.prometheus_config.to_socket_addr();
+
+        crate::spawn_metric_thread(&runtime, socket_addr_prometheus);
 
         let addr =
             config
