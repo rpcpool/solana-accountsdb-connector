@@ -233,7 +233,7 @@ impl SlotsProcessing {
                 .unwrap();
                 tx.query("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1AND status = 'processed')", &[&slot_no]).await.unwrap();
                 tx.query(
-                    "DELETE FROM slots WHERE slot < $1 AND status = 'processed'",
+                    "DELETE FROM slot WHERE slot < $1 AND status = 'processed'",
                     &[&slot_no],
                 )
                 .await
