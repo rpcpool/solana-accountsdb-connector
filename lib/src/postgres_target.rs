@@ -226,14 +226,14 @@ impl SlotsProcessing {
                 let tx = client.transaction().await.unwrap();
 
                 tx.query(
-                    "UPDATE slot SET status = 'confirmed' WHERE slot = $1",
+                    "UPDATE slot SET status = 'Confirmed' WHERE slot = $1",
                     &[&slot_no],
                 )
                 .await
                 .unwrap();
-                tx.query("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'processed')", &[&slot_no]).await.unwrap();
+                tx.query("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Processed')", &[&slot_no]).await.unwrap();
                 tx.query(
-                    "DELETE FROM slot WHERE slot < $1 AND status = 'processed'",
+                    "DELETE FROM slot WHERE slot < $1 AND status = 'Processed'",
                     &[&slot_no],
                 )
                 .await
@@ -245,14 +245,14 @@ impl SlotsProcessing {
                 let tx = client.transaction().await.unwrap();
 
                 tx.query(
-                    "UPDATE slot SET status = 'finalized' WHERE slot = $1",
+                    "UPDATE slot SET status = 'Rooted' WHERE slot = $1",
                     &[&slot_no],
                 )
                 .await
                 .unwrap();
-                tx.query("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'confirmed')", &[&slot_no]).await.unwrap();
+                tx.query("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Confirmed')", &[&slot_no]).await.unwrap();
                 tx.query(
-                    "DELETE FROM slot WHERE slot < $1 AND status = 'confirmed'",
+                    "DELETE FROM slot WHERE slot < $1 AND status = 'Confirmed'",
                     &[&slot_no],
                 )
                 .await
