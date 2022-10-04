@@ -2,7 +2,7 @@
  * This plugin implementation for PostgreSQL requires the following tables
  */
 
-CREATE TYPE SlotStatus AS ENUM (
+CREATE TYPE "SlotStatus" AS ENUM (
     'Rooted',
     'Confirmed',
     'Processed'
@@ -37,6 +37,6 @@ CREATE INDEX account_write_pubkey_id_idx on account_write(pubkey);
 CREATE TABLE slot (
     slot BIGINT PRIMARY KEY,
     parent BIGINT,
-    status SlotStatus NOT NULL
+    status "SlotStatus" NOT NULL
 );
 CREATE INDEX ON slot (parent);
