@@ -209,7 +209,6 @@ impl SlotsProcessing {
 
         match status {
             pg::SlotStatus::Processed => {
-                let status = "Processed";
 
                 let tx = client.transaction().await.unwrap();
 
