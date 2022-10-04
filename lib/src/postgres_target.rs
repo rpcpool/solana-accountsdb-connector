@@ -209,53 +209,47 @@ impl SlotsProcessing {
 
         match status {
             pg::SlotStatus::Processed => {
-
-                let tx = client.transaction().await.unwrap();
+                let tx = client.transaction().await?;
 
                 tx.query(
                     "INSERT INTO slot(slot, parent, status) VALUES($1, $2, $3)",
                     &[&slot_no, &parent, &status],
                 )
-                .await
-                .unwrap();
+                .await?;
 
                 tx.into_inner().commit().await?;
             }
             pg::SlotStatus::Confirmed => {
-                let tx = client.transaction().await.unwrap();
+                let tx = client.transaction().await?;
 
                 tx.query(
                     "UPDATE slot SET status = 'Confirmed' WHERE slot = $1",
                     &[&slot_no],
                 )
-                .await
-                .unwrap();
-                tx.query("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Processed')", &[&slot_no]).await.unwrap();
+                .await?;
+                tx.query("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Processed')", &[&slot_no]).await?;
                 tx.query(
                     "DELETE FROM slot WHERE slot < $1 AND status = 'Processed'",
                     &[&slot_no],
                 )
-                .await
-                .unwrap();
+                .await?;
 
                 tx.into_inner().commit().await?;
             }
             pg::SlotStatus::Rooted => {
-                let tx = client.transaction().await.unwrap();
+                let tx = client.transaction().await?;
 
                 tx.query(
                     "UPDATE slot SET status = 'Rooted' WHERE slot = $1",
                     &[&slot_no],
                 )
-                .await
-                .unwrap();
-                tx.query("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Confirmed')", &[&slot_no]).await.unwrap();
+                .await?;
+                tx.query("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Confirmed')", &[&slot_no]).await?;
                 tx.query(
                     "DELETE FROM slot WHERE slot < $1 AND status = 'Confirmed'",
                     &[&slot_no],
                 )
-                .await
-                .unwrap();
+                .await?;
 
                 tx.into_inner().commit().await?;
             }
