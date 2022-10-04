@@ -2,7 +2,7 @@ use anyhow::Context;
 use log::*;
 use native_tls::TlsConnector;
 use postgres_native_tls::MakeTlsConnector;
-use postgres_query::{query, query_dyn};
+use postgres_query::query;
 use std::{collections::HashMap, convert::TryFrom, time::Duration};
 
 use crate::{metrics, AccountTables, AccountWrite, PostgresConfig, SlotStatus, SlotUpdate};
@@ -85,7 +85,7 @@ async fn update_postgres_client<'a>(
     client: &'a mut Option<postgres_query::Caching<tokio_postgres::Client>>,
     rx: &async_channel::Receiver<Option<tokio_postgres::Client>>,
     config: &PostgresConfig,
-) -> &'a postgres_query::Caching<tokio_postgres::Client> {
+) -> &'a mut postgres_query::Caching<tokio_postgres::Client> {
     // get the most recent client, waiting if there's a disconnect
     while !rx.is_empty() || client.is_none() {
         tokio::select! {
@@ -98,7 +98,7 @@ async fn update_postgres_client<'a>(
             },
         }
     }
-    client.as_ref().expect("must contain value")
+    client.as_mut().expect("must contain value")
 }
 
 async fn process_account_write(
@@ -187,73 +187,6 @@ impl Slots {
     }
 }
 
-fn make_cleanup_steps(tables: &Vec<String>) -> HashMap<String, String> {
-    let mut steps = HashMap::<String, String>::new();
-
-    // Delete all account writes that came before the newest rooted slot except
-    // for the newest rooted write for each pubkey.
-    // This could be older rooted writes or writes in uncled slots that came
-    // before the newest rooted slot.
-    //
-    // Also delete _all_ writes from before the newest snapshot, because these may
-    // be for deleted accounts where the deletion event was missed. Snapshots
-    // provide a new state for all live accounts, but don't tell us about deleted
-    // accounts.
-    //
-    // The way this is done, by taking the newest snapshot that's at least
-    // min_snapshot_age behind the newest rooted slot is a workaround: we don't know
-    // how long it'll take to insert snapshot data, but assume it'll be done by that
-    // time.
-    let min_snapshot_age = 300;
-    steps.extend(
-        tables
-            .iter()
-            .map(|table_name| {
-                let sql = format!(
-                    "WITH
-                    newest_rooted AS (
-                        SELECT max(slot) AS newest_rooted_slot FROM slot WHERE status = 'Rooted'),
-                    newest_snapshot AS (
-                        SELECT max(slot) AS newest_snapshot_slot FROM account_write, newest_rooted
-                        WHERE write_version = 0 AND slot + {min_snapshot_age} < newest_rooted_slot)
-                DELETE FROM {table} AS data
-                USING
-                    newest_rooted,
-                    newest_snapshot,
-                    (SELECT DISTINCT ON(pubkey_id) pubkey_id, slot, write_version
-                     FROM {table}
-                     LEFT JOIN slot USING(slot)
-                     CROSS JOIN newest_rooted
-                     WHERE slot <= newest_rooted_slot AND (status = 'Rooted' OR status is NULL)
-                     ORDER BY pubkey_id, slot DESC, write_version DESC
-                     ) newest_rooted_write
-                WHERE
-                    data.pubkey_id = newest_rooted_write.pubkey_id AND (
-                        data.slot < newest_snapshot_slot OR (
-                            data.slot <= newest_rooted_slot
-                            AND (data.slot != newest_rooted_write.slot OR data.write_version != newest_rooted_write.write_version)
-                        )
-                    )",
-                    table = table_name,
-                    min_snapshot_age = min_snapshot_age,
-                );
-                (format!("delete old writes in {}", table_name), sql)
-            })
-            .collect::<HashMap<String, String>>(),
-    );
-
-    // Delete information about older slots
-    steps.insert(
-        "delete old slots".into(),
-        "DELETE FROM slot
-         USING (SELECT max(slot) as newest_rooted_slot FROM slot WHERE status = 'Rooted') s
-         WHERE slot + 1000 < newest_rooted_slot"
-            .into(),
-    );
-
-    steps
-}
-
 #[derive(Clone)]
 struct SlotsProcessing {}
 
@@ -264,83 +197,79 @@ impl SlotsProcessing {
 
     async fn process(
         &self,
-        client: &postgres_query::Caching<tokio_postgres::Client>,
+        client: &mut postgres_query::Caching<tokio_postgres::Client>,
         update: &SlotUpdate,
-        meta: &SlotPreprocessing,
     ) -> anyhow::Result<()> {
-        let slot = update.slot as i64;
+        let slot_no = update.slot as i64;
         let status: pg::SlotStatus = update.status.into();
-        if let Some(parent) = update.parent {
-            let parent = parent as i64;
-            let query = query!(
-                "INSERT INTO slot
-                    (slot, parent, status, uncle)
-                VALUES
-                    ($slot, $parent, $status, FALSE)
-                ON CONFLICT (slot) DO UPDATE SET
-                    parent=$parent, status=$status",
-                slot,
-                parent,
-                status,
-            );
-            let _ = query.execute(client).await.context("updating slot row")?;
-        } else {
-            let query = query!(
-                "INSERT INTO slot
-                    (slot, parent, status, uncle)
-                VALUES
-                    ($slot, NULL, $status, FALSE)
-                ON CONFLICT (slot) DO UPDATE SET
-                    status=$status",
-                slot,
-                status,
-            );
-            let _ = query.execute(client).await.context("updating slot row")?;
-        }
+        let parent = match update.parent {
+            Some(parent) => parent as i64,
+            None => 0,
+        };
 
-        if meta.new_rooted_head {
-            let slot = update.slot as i64;
-            // Mark preceeding non-uncle slots as rooted
-            let query = query!(
-                "UPDATE slot SET status = 'Rooted'
-                WHERE slot < $newest_final_slot
-                AND (NOT uncle)
-                AND status != 'Rooted'",
-                newest_final_slot = slot
-            );
-            let _ = query
-                .execute(client)
-                .await
-                .context("updating preceding non-rooted slots")?;
-        }
+        match status {
+            pg::SlotStatus::Processed => {
+                let tx = client.transaction().await?;
 
-        if meta.new_processed_head || meta.parent_update {
-            // update the uncle column for the chain of slots from the
-            // newest down the the first rooted slot
-            let query = query!(
-                "WITH RECURSIVE
-                    liveslots AS (
-                        SELECT slot.*, 0 AS depth FROM slot
-                            WHERE slot = (SELECT max(slot) FROM slot)
-                        UNION ALL
-                        SELECT s.*, depth + 1 FROM slot s
-                            INNER JOIN liveslots l ON s.slot = l.parent
-                            WHERE l.status != 'Rooted' AND depth < 1000
-                    ),
-                    min_slot AS (SELECT min(slot) AS min_slot FROM liveslots)
-                UPDATE slot SET
-                    uncle = NOT EXISTS (SELECT 1 FROM liveslots WHERE liveslots.slot = slot.slot)
-                    FROM min_slot
-                    WHERE slot >= min_slot;"
-            );
-            let _ = query
-                .execute(client)
-                .await
-                .context("recomputing slot uncle status")?;
+                tx.query(
+                    "INSERT INTO slot(slot, parent, status) VALUES($1, $2, $3)",
+                    &[&slot_no, &parent, &status],
+                )
+                .await?;
+
+                tx.into_inner().commit().await?;
+            }
+            pg::SlotStatus::Confirmed => {
+                let tx = client.transaction().await?;
+
+                tx.query(
+                    "UPDATE slot SET status = 'Confirmed' WHERE slot = $1",
+                    &[&slot_no],
+                )
+                .await?;
+                tx.query("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Processed')", &[&slot_no]).await?;
+                tx.query(
+                    "DELETE FROM slot WHERE slot < $1 AND status = 'Processed'",
+                    &[&slot_no],
+                )
+                .await?;
+
+                tx.into_inner().commit().await?;
+            }
+            pg::SlotStatus::Rooted => {
+                let tx = client.transaction().await?;
+
+                tx.query(
+                    "UPDATE slot SET status = 'Rooted' WHERE slot = $1",
+                    &[&slot_no],
+                )
+                .await?;
+                tx.query("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Confirmed')", &[&slot_no]).await?;
+                tx.query(
+                    "DELETE FROM slot WHERE slot < $1 AND status = 'Confirmed'",
+                    &[&slot_no],
+                )
+                .await?;
+
+                tx.into_inner().commit().await?;
+            }
         }
 
         trace!("slot update done {}", update.slot);
         Ok(())
+    }
+}
+
+fn exec_ok_or_err(
+    exec_result: Result<(), tokio_postgres::Error>,
+) -> Result<(), tokio_postgres::Error> {
+    match exec_result {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            tracing::error!("Encountered error while updating slot. Error `{:?}`", error);
+
+            return Err(error);
+        }
     }
 }
 
@@ -493,7 +422,7 @@ pub async fn init(
         tokio::spawn(async move {
             let mut client_opt = None;
             loop {
-                let (update, preprocessing) =
+                let (update, _preprocessing) =
                     receiver_c.recv().await.expect("sender must stay alive");
                 trace!("slot insertion, slot {}", update.slot);
 
@@ -501,10 +430,7 @@ pub async fn init(
                 loop {
                     let client =
                         update_postgres_client(&mut client_opt, &postgres_slot, &config).await;
-                    if let Err(err) = slots_processing
-                        .process(client, &update, &preprocessing)
-                        .await
-                    {
+                    if let Err(err) = slots_processing.process(client, &update).await {
                         metric_retries.increment();
                         error_count += 1;
                         if error_count - 1 < config.retry_query_max_count {
@@ -520,44 +446,6 @@ pub async fn init(
                     break;
                 }
                 metric_last_write.set_max(secs_since_epoch());
-            }
-        });
-    }
-
-    // postgres cleanup thread
-    if config.cleanup_interval_secs > 0 {
-        let table_names: Vec<String> = account_tables
-            .iter()
-            .map(|table| table.table_name().to_string())
-            .collect();
-        let cleanup_steps = make_cleanup_steps(&table_names);
-
-        let postgres_con =
-            postgres_connection(config, metric_con_retries.clone(), metric_con_live.clone())
-                .await?;
-        let mut metric_last_cleanup =
-            metrics_sender.register_u64("postgres_cleanup_last_success_timestamp".into());
-        let mut metric_cleanup_errors =
-            metrics_sender.register_u64("postgres_cleanup_errors".into());
-        let config = config.clone();
-        tokio::spawn(async move {
-            let mut client_opt = None;
-            loop {
-                tokio::time::sleep(Duration::from_secs(config.cleanup_interval_secs)).await;
-                let client = update_postgres_client(&mut client_opt, &postgres_con, &config).await;
-
-                let mut all_successful = true;
-                for (name, cleanup_sql) in &cleanup_steps {
-                    let query = query_dyn!(&cleanup_sql).unwrap();
-                    if let Err(err) = query.execute(client).await {
-                        warn!("failed to process cleanup step {}: {:?}", name, err);
-                        metric_cleanup_errors.increment();
-                        all_successful = false;
-                    }
-                }
-                if all_successful {
-                    metric_last_cleanup.set_max(secs_since_epoch());
-                }
             }
         });
     }

@@ -44,7 +44,7 @@ impl AccountWrite {
     fn from(pubkey: Pubkey, slot: u64, write_version: u64, account: Account) -> AccountWrite {
         AccountWrite {
             pubkey,
-            slot: slot,
+            slot,
             write_version,
             lamports: account.lamports,
             owner: account.owner,
@@ -160,30 +160,47 @@ impl AccountTable for RawAccountTable {
         let pubkey = encode_address(&account_write.pubkey);
         let owner = encode_address(&account_write.owner);
         let slot = account_write.slot as i64;
-        let write_version = account_write.write_version as i64;
         let lamports = account_write.lamports as i64;
         let rent_epoch = account_write.rent_epoch as i64;
+        let data = &account_write.data;
+        let executable = account_write.executable;
+        let is_selected = account_write.is_selected;
+        let write_version = account_write.write_version as i64;
 
         // TODO: should update for same write_version to work with websocket input
         let query = postgres_query::query!(
             "INSERT INTO account_write
-            (pubkey_id, slot, write_version, is_selected,
-             owner_id, lamports, executable, rent_epoch, data)
-            VALUES
-            (map_pubkey($pubkey), $slot, $write_version, $is_selected,
-             map_pubkey($owner), $lamports, $executable, $rent_epoch, $data)
-            ON CONFLICT (pubkey_id, slot, write_version) DO NOTHING",
+                    (pubkey, slot, is_selected,
+                    owner, lamports, executable, rent_epoch, data, write_version)
+                VALUES
+                ($pubkey, $slot, $is_selected,
+                $owner, $lamports, $executable, $rent_epoch, $data, $write_version)
+                ON CONFLICT (pubkey, slot)
+                DO 
+                UPDATE SET
+                    is_selected = $is_selected, owner = $owner, lamports = $lamports, 
+                    executable = $executable , rent_epoch = $rent_epoch, 
+                    data = $data, write_version= $write_version",
             pubkey,
             slot,
-            write_version,
-            is_selected = account_write.is_selected,
+            is_selected,
             owner,
             lamports,
-            executable = account_write.executable,
+            executable,
             rent_epoch,
-            data = account_write.data,
+            data,
+            write_version
         );
-        let _ = query.execute(client).await?;
+
+        match query.execute(client).await {
+            Ok(_) => (),
+            Err(error) => {
+                tracing::error!("Error executing `INSERT QUERY`. Error `{:?}` ", error);
+
+                return Err(anyhow::Error::new(error));
+            }
+        }
+
         Ok(())
     }
 }
