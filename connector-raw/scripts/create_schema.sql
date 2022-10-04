@@ -17,11 +17,6 @@ CREATE TABLE monitoring (
     account_write_queue BIGINT
 );
 
-CREATE TABLE pubkey (
-    pubkey_id BIGSERIAL PRIMARY KEY,
-    pubkey VARCHAR(44) NOT NULL UNIQUE
-);
-
 -- The table storing account writes, keeping only the newest write_version per slot
 CREATE TABLE account_write (
     pubkey VARCHAR NOT NULL,
