@@ -1,14 +1,17 @@
-use hyper::{
-    service::{make_service_fn, service_fn},
-    Body, Request, Response, Server,
+use {
+    hyper::{
+        service::{make_service_fn, service_fn},
+        Body, Request, Response, Server,
+    },
+    log::*,
+    prometheus::{
+        labels, opts, register_counter, register_histogram_vec, Counter, Encoder, HistogramVec,
+        IntGaugeVec, Opts, Registry, TextEncoder,
+    },
+    serde::{Deserialize, Serialize},
+    std::net::{IpAddr, Ipv4Addr, SocketAddr},
+    tokio::runtime::Runtime,
 };
-use prometheus::{
-    labels, opts, register_counter, register_histogram_vec, Counter, Encoder, HistogramVec,
-    IntGaugeVec, Opts, Registry, TextEncoder,
-};
-use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use tokio::runtime::Runtime;
 
 lazy_static::lazy_static! {
     pub(crate) static ref REGISTRY: Registry = Registry::new();
@@ -95,9 +98,15 @@ pub fn spawn_metric_thread(runtime: &Runtime, socket_addr: SocketAddr) {
     runtime.spawn(async move {
         let addr: SocketAddr = socket_addr;
 
-        match crate::CHANNEL.1.write().await.recv().await {
+        match crate::geyser_plugin_grpc::CHANNEL
+            .1
+            .write()
+            .await
+            .recv()
+            .await
+        {
             Some(_) => {
-                tracing::info!(
+                info!(
                     "GeyserPlugin Prometheus Metrics -> Listening on http://{}",
                     addr
                 );
@@ -107,11 +116,11 @@ pub fn spawn_metric_thread(runtime: &Runtime, socket_addr: SocketAddr) {
                 }));
 
                 if let Err(err) = serve_future.await {
-                    tracing::error!("server error: {}", err);
+                    error!("server error: {}", err);
                 }
             }
             None => {
-                tracing::error!("`Sender` has been dropped!");
+                error!("`Sender` has been dropped!");
             }
         }
     });
@@ -124,14 +133,14 @@ async fn serve_metrics(_req: Request<Body>) -> Result<Response<Body>, hyper::htt
     match encoder.encode(&metric_families, &mut buffer) {
         Ok(_) => (),
         Err(error) => {
-            tracing::error!("Error while encoding metrics: `{}`", error.to_string());
+            error!("Error while encoding metrics: `{}`", error.to_string());
         }
     }
 
     match Response::builder().status(200).body(Body::from(buffer)) {
         Ok(response) => Ok(response),
         Err(error) => {
-            tracing::error!("Hyper error when serving metrics: `{}`", error.to_string());
+            error!("Hyper error when serving metrics: `{}`", error.to_string());
 
             Err(error)
         }
@@ -149,7 +158,7 @@ impl PrometheusConfig {
         let ip = match self.ip.parse::<Ipv4Addr>() {
             Ok(ip_addr) => ip_addr,
             Err(error) => {
-                tracing::error!("Error parsing IP address: `{:?}`", error);
+                error!("Error parsing IP address: `{:?}`", error);
 
                 std::process::exit(1);
             }

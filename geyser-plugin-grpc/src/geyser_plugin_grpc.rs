@@ -1,16 +1,19 @@
-use lazy_static::lazy_static;
 use {
     crate::{
-        accounts_selector::AccountsSelector, compression::zstd_compress, PrometheusConfig,
-        ACCOUNT_UPDATE, ACCOUNT_UPDATE_COUNTER, ACCOUNT_UPDATE_HISTOGRAM, END_OF_STARTUP,
-        ONLOAD_COUNTER, ONLOAD_HISTOGRAM, SLOT_UPDATE, SLOT_UPDATE_COUNTER, SLOT_UPDATE_HISTOGRAM,
-        UNLOAD_COUNTER, UNLOAD_HISTOGRAM,
+        accounts_selector::AccountsSelector,
+        compression::zstd_compress,
+        prom::{
+            PrometheusConfig, ACCOUNT_UPDATE, ACCOUNT_UPDATE_COUNTER, ACCOUNT_UPDATE_HISTOGRAM,
+            END_OF_STARTUP, ONLOAD_COUNTER, ONLOAD_HISTOGRAM, SLOT_UPDATE, SLOT_UPDATE_COUNTER,
+            SLOT_UPDATE_HISTOGRAM, UNLOAD_COUNTER, UNLOAD_HISTOGRAM,
+        },
     },
     geyser_proto::{
         slot_update::Status as SlotUpdateStatus, update::UpdateOneof, AccountWrite, Ping,
         SlotUpdate, SubscribeRequest, SubscribeResponse, Update, UpdateAccountsSelectorRequest,
         UpdateAccountsSelectorResponse,
     },
+    lazy_static::lazy_static,
     log::*,
     serde_derive::Deserialize,
     solana_geyser_plugin_interface::geyser_plugin_interface::{
@@ -234,7 +237,7 @@ impl GeyserPlugin for Plugin {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let socket_addr_prometheus = config.prometheus_config.to_socket_addr();
 
-        crate::spawn_metric_thread(&runtime, socket_addr_prometheus);
+        crate::prom::spawn_metric_thread(&runtime, socket_addr_prometheus);
 
         let addr =
             config
