@@ -30,21 +30,9 @@ use {
             Arc, RwLock,
         },
     },
-    tokio::sync::{
-        broadcast, mpsc,
-        mpsc::{Receiver, Sender},
-        RwLock as TokioRwLock,
-    },
+    tokio::sync::{broadcast, mpsc},
     tonic::transport::Server,
 };
-
-lazy_static::lazy_static! {
-    pub(crate) static ref CHANNEL: (Sender<()>, TokioRwLock<Receiver<()>>) = {
-        let (sender, receiver) = mpsc::channel::<()>(100);
-
-        (sender, TokioRwLock::new(receiver))
-    };
-}
 
 pub mod geyser_proto {
     tonic::include_proto!("accountsdb");
@@ -156,6 +144,7 @@ pub mod geyser_service {
 
 pub struct PluginData {
     runtime: Option<tokio::runtime::Runtime>,
+    prometheus: PrometheusService,
     server_broadcast: broadcast::Sender<Update>,
     server_exit_sender: Option<broadcast::Sender<()>>,
     accounts_selector: Arc<RwLock<AccountsSelector>>,
@@ -184,11 +173,12 @@ impl std::fmt::Debug for Plugin {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PluginConfig {
     pub bind_address: String,
     pub service_config: geyser_service::ServiceConfig,
     pub zstd_compression: bool,
-    pub prometheus_config: PrometheusConfig,
+    pub prometheus: Option<PrometheusConfig>,
 }
 
 impl PluginData {
@@ -206,8 +196,6 @@ impl GeyserPlugin for Plugin {
     }
 
     fn on_load(&mut self, config_file: &str) -> PluginResult<()> {
-        PrometheusService::register();
-
         ONLOAD_COUNTER.inc();
         let timer = ONLOAD_HISTOGRAM.with_label_values(&["all"]).start_timer();
 
@@ -237,9 +225,7 @@ impl GeyserPlugin for Plugin {
         })?;
 
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let socket_addr_prometheus = config.prometheus_config.to_socket_addr();
-
-        crate::prom::spawn_metric_thread(&runtime, socket_addr_prometheus);
+        let prometheus = PrometheusService::new(&runtime, config.prometheus);
 
         let addr =
             config
@@ -287,6 +273,7 @@ impl GeyserPlugin for Plugin {
 
         self.data = Some(PluginData {
             runtime: Some(runtime),
+            prometheus,
             server_broadcast,
             server_exit_sender: Some(server_exit_sender),
             accounts_selector,
@@ -307,12 +294,13 @@ impl GeyserPlugin for Plugin {
         let timer = UNLOAD_HISTOGRAM.with_label_values(&["all"]).start_timer();
 
         let mut data = self.data.take().expect("plugin must be initialized");
+
+        data.prometheus.shutdown();
         data.server_exit_sender
             .take()
             .expect("on_unload can only be called once")
             .send(())
             .expect("sending grpc server termination should succeed");
-
         data.runtime
             .take()
             .expect("must exist")

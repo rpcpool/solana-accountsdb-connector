@@ -1,20 +1,19 @@
 use {
     crate::version::VERSION as VERSION_INFO,
+    futures_util::FutureExt,
     hyper::{
+        server::conn::AddrStream,
         service::{make_service_fn, service_fn},
-        Body, Request, Response, Server,
+        Body, Request, Response, Server, StatusCode,
     },
     log::*,
     prometheus::{
-        labels, opts, register_counter, register_histogram_vec, Counter, Encoder, HistogramVec,
+        labels, opts, register_counter, register_histogram_vec, Counter, HistogramVec,
         IntCounterVec, IntGaugeVec, Opts, Registry, TextEncoder,
     },
-    serde::{Deserialize, Serialize},
-    std::{
-        net::{IpAddr, Ipv4Addr, SocketAddr},
-        sync::Once,
-    },
-    tokio::runtime::Runtime,
+    serde::Deserialize,
+    std::{net::SocketAddr, sync::Once},
+    tokio::{runtime::Runtime, sync::oneshot},
 };
 
 lazy_static::lazy_static! {
@@ -103,85 +102,20 @@ lazy_static::lazy_static! {
     .unwrap();
 }
 
-pub fn spawn_metric_thread(runtime: &Runtime, socket_addr: SocketAddr) {
-    runtime.spawn(async move {
-        let addr: SocketAddr = socket_addr;
-
-        match crate::geyser_plugin_grpc::CHANNEL
-            .1
-            .write()
-            .await
-            .recv()
-            .await
-        {
-            Some(_) => {
-                info!(
-                    "GeyserPlugin Prometheus Metrics -> Listening on http://{}",
-                    addr
-                );
-
-                let serve_future = Server::bind(&addr).serve(make_service_fn(|_| async {
-                    Ok::<_, hyper::Error>(service_fn(serve_metrics))
-                }));
-
-                if let Err(err) = serve_future.await {
-                    error!("server error: {}", err);
-                }
-            }
-            None => {
-                error!("`Sender` has been dropped!");
-            }
-        }
-    });
-}
-
-async fn serve_metrics(_req: Request<Body>) -> Result<Response<Body>, hyper::http::Error> {
-    let encoder = TextEncoder::new();
-    let metric_families = REGISTRY.gather();
-    let mut buffer = vec![];
-    match encoder.encode(&metric_families, &mut buffer) {
-        Ok(_) => (),
-        Err(error) => {
-            error!("Error while encoding metrics: `{}`", error.to_string());
-        }
-    }
-
-    match Response::builder().status(200).body(Body::from(buffer)) {
-        Ok(response) => Ok(response),
-        Err(error) => {
-            error!("Hyper error when serving metrics: `{}`", error.to_string());
-
-            Err(error)
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PrometheusConfig {
-    pub ip: String,
-    pub port: u16,
-}
-
-impl PrometheusConfig {
-    pub fn to_socket_addr(&self) -> SocketAddr {
-        let ip = match self.ip.parse::<Ipv4Addr>() {
-            Ok(ip_addr) => ip_addr,
-            Err(error) => {
-                error!("Error parsing IP address: `{:?}`", error);
-
-                std::process::exit(1);
-            }
-        };
-
-        SocketAddr::new(IpAddr::V4(ip), self.port)
-    }
+    /// Address of Prometheus service.
+    pub address: SocketAddr,
 }
 
 #[derive(Debug)]
-pub struct PrometheusService;
+pub struct PrometheusService {
+    shutdown_signal: oneshot::Sender<()>,
+}
 
 impl PrometheusService {
-    pub fn register() {
+    pub fn new(runtime: &Runtime, config: Option<PrometheusConfig>) -> Self {
         static REGISTER: Once = Once::new();
         REGISTER.call_once(|| {
             macro_rules! register {
@@ -203,5 +137,49 @@ impl PrometheusService {
                 VERSION.with_label_values(&[key, value]).inc()
             }
         });
+
+        let (tx, rx) = oneshot::channel();
+        if let Some(PrometheusConfig { address }) = config {
+            runtime.spawn(async move {
+                let make_service = make_service_fn(move |_: &AddrStream| async move {
+                    Ok::<_, hyper::Error>(service_fn(move |req: Request<Body>| async move {
+                        let response = match req.uri().path() {
+                            "/metrics" => metrics_handler(),
+                            _ => not_found_handler(),
+                        };
+                        Ok::<_, hyper::Error>(response)
+                    }))
+                });
+                let server = Server::bind(&address).serve(make_service);
+                if let Err(error) = tokio::try_join!(server, rx.map(|_| Ok(()))) {
+                    error!("prometheus service failed: {}", error);
+                }
+            });
+        }
+
+        PrometheusService {
+            shutdown_signal: tx,
+        }
     }
+
+    pub fn shutdown(self) {
+        let _ = self.shutdown_signal.send(());
+    }
+}
+
+fn metrics_handler() -> Response<Body> {
+    let metrics = TextEncoder::new()
+        .encode_to_string(&REGISTRY.gather())
+        .unwrap_or_else(|error| {
+            error!("could not encode custom metrics: {}", error);
+            String::new()
+        });
+    Response::builder().body(Body::from(metrics)).unwrap()
+}
+
+fn not_found_handler() -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(Body::empty())
+        .unwrap()
 }
