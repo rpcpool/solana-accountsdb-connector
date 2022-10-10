@@ -7,10 +7,7 @@ use {
         Body, Request, Response, Server, StatusCode,
     },
     log::*,
-    prometheus::{
-        labels, opts, register_counter, register_histogram_vec, Counter, HistogramVec,
-        IntCounterVec, IntGaugeVec, Opts, Registry, TextEncoder,
-    },
+    prometheus::{IntCounter, IntCounterVec, IntGaugeVec, Opts, Registry, TextEncoder},
     serde::Deserialize,
     std::{net::SocketAddr, sync::Once},
     tokio::{runtime::Runtime, sync::oneshot},
@@ -24,82 +21,19 @@ lazy_static::lazy_static! {
         &["key", "value"]
     ).unwrap();
 
-    pub static ref ONLOAD_COUNTER: Counter = register_counter!(opts!(
-        "onload_count",
-        "Number of times `onload()` method was called.",
-        labels! {"handler" => "all",}
-    ))
-    .unwrap();
-
-    pub static ref ONLOAD_HISTOGRAM: HistogramVec = register_histogram_vec!(
-        "plugin_loading_duration",
-        "The latencies in seconds for performing plugin initialization.",
-        &["handler"]
-    )
-    .unwrap();
-
-
-    pub static ref UNLOAD_COUNTER: Counter = register_counter!(opts!(
-        "unload_count",
-        "Number of times `unload()` method was called.",
-        labels! {"handler" => "all",}
-    ))
-    .unwrap();
-
-    pub static ref UNLOAD_HISTOGRAM: HistogramVec = register_histogram_vec!(
-        "plugin_unloading_duration",
-        "The latencies in seconds for performing plugin unwinding.",
-        &["handler"]
-    )
-    .unwrap();
-
-
-    pub static ref ACCOUNT_UPDATE_COUNTER: Counter = register_counter!(opts!(
-        "unload_count",
-        "Number of times `unload()` method was called.",
-        labels! {"handler" => "all",}
-    ))
-    .unwrap();
-
-    pub static ref ACCOUNT_UPDATE_HISTOGRAM: HistogramVec = register_histogram_vec!(
-        "plugin_unloading_duration",
-        "The latencies in seconds for performing plugin unwinding.",
-        &["handler"]
-    )
-    .unwrap();
-
-
-    pub static ref ACCOUNT_UPDATE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("account_info", "An account has been updated"),
-        &["type"]
+    pub static ref SLOTS_LAST_PROCESSED: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("slots_last_processed", "Last processed slot by plugin in send loop"),
+        &["status"]
     ).unwrap();
 
-    pub static ref SLOT_UPDATE_COUNTER: Counter = register_counter!(opts!(
-        "slot_update_count",
-        "Number of times slot was update.",
-        labels! {"handler" => "all",}
-    ))
-    .unwrap();
-
-    pub static ref SLOT_UPDATE_HISTOGRAM: HistogramVec = register_histogram_vec!(
-        "slot_update_duration",
-        "The latencies in seconds for performing of a slot update.",
-        &["handler"]
-    )
-    .unwrap();
-
-
-    pub static ref SLOT_UPDATE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("slot_no", "A slot has been updated"),
-        &["type"]
+    pub static ref BROADCAST_SLOTS_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("broadcast_slots_total", "Total number of broadcasted slot messages"),
+        &["status"]
     ).unwrap();
 
-    pub static ref END_OF_STARTUP: Counter = register_counter!(opts!(
-        "startup_finished",
-        "Startup finished notification received",
-        labels! {"handler" => "all",}
-    ))
-    .unwrap();
+    pub static ref BROADCAST_ACCOUNTS_TOTAL: IntCounter = IntCounter::new(
+        "broadcast_slots_total", "Total number of broadcasted slot messages",
+    ).unwrap();
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -126,6 +60,9 @@ impl PrometheusService {
                 };
             }
             register!(VERSION);
+            register!(SLOTS_LAST_PROCESSED);
+            register!(BROADCAST_SLOTS_TOTAL);
+            register!(BROADCAST_ACCOUNTS_TOTAL);
 
             for (key, value) in &[
                 ("version", VERSION_INFO.version),

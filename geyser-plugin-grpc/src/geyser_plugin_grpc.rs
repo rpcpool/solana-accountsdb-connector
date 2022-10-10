@@ -3,10 +3,8 @@ use {
         accounts_selector::AccountsSelector,
         compression::zstd_compress,
         prom::{
-            PrometheusConfig, PrometheusService, ACCOUNT_UPDATE, ACCOUNT_UPDATE_COUNTER,
-            ACCOUNT_UPDATE_HISTOGRAM, END_OF_STARTUP, ONLOAD_COUNTER, ONLOAD_HISTOGRAM,
-            SLOT_UPDATE, SLOT_UPDATE_COUNTER, SLOT_UPDATE_HISTOGRAM, UNLOAD_COUNTER,
-            UNLOAD_HISTOGRAM,
+            PrometheusConfig, PrometheusService, BROADCAST_ACCOUNTS_TOTAL, BROADCAST_SLOTS_TOTAL,
+            SLOTS_LAST_PROCESSED,
         },
     },
     geyser_proto::{
@@ -143,10 +141,10 @@ pub mod geyser_service {
 }
 
 pub struct PluginData {
-    runtime: Option<tokio::runtime::Runtime>,
+    runtime: tokio::runtime::Runtime,
     prometheus: PrometheusService,
     server_broadcast: broadcast::Sender<Update>,
-    server_exit_sender: Option<broadcast::Sender<()>>,
+    server_exit_sender: broadcast::Sender<()>,
     accounts_selector: Arc<RwLock<AccountsSelector>>,
 
     /// Largest slot that an account write was processed for
@@ -196,9 +194,6 @@ impl GeyserPlugin for Plugin {
     }
 
     fn on_load(&mut self, config_file: &str) -> PluginResult<()> {
-        ONLOAD_COUNTER.inc();
-        let timer = ONLOAD_HISTOGRAM.with_label_values(&["all"]).start_timer();
-
         solana_logger::setup_with_default("info");
         info!(
             "Loading plugin {:?} from config_file {:?}",
@@ -248,7 +243,6 @@ impl GeyserPlugin for Plugin {
         let server = geyser_proto::accounts_db_server::AccountsDbServer::new(service)
             .accept_gzip()
             .send_gzip();
-        let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.spawn(Server::builder().add_service(server).serve_with_shutdown(
             addr,
             async move {
@@ -272,17 +266,15 @@ impl GeyserPlugin for Plugin {
         });
 
         self.data = Some(PluginData {
-            runtime: Some(runtime),
+            runtime,
             prometheus,
             server_broadcast,
-            server_exit_sender: Some(server_exit_sender),
+            server_exit_sender,
             accounts_selector,
             highest_write_slot,
             active_accounts: RwLock::new(HashSet::new()),
             zstd_compression: config.zstd_compression,
         });
-
-        timer.observe_duration();
 
         Ok(())
     }
@@ -290,23 +282,13 @@ impl GeyserPlugin for Plugin {
     fn on_unload(&mut self) {
         info!("Unloading plugin: {:?}", self.name());
 
-        UNLOAD_COUNTER.inc();
-        let timer = UNLOAD_HISTOGRAM.with_label_values(&["all"]).start_timer();
-
-        let mut data = self.data.take().expect("plugin must be initialized");
+        let data = self.data.take().expect("plugin must be initialized");
 
         data.prometheus.shutdown();
         data.server_exit_sender
-            .take()
-            .expect("on_unload can only be called once")
             .send(())
             .expect("sending grpc server termination should succeed");
-        data.runtime
-            .take()
-            .expect("must exist")
-            .shutdown_background();
-
-        timer.observe_duration();
+        data.runtime.shutdown_background();
     }
 
     fn update_account(
@@ -315,11 +297,6 @@ impl GeyserPlugin for Plugin {
         slot: u64,
         is_startup: bool,
     ) -> PluginResult<()> {
-        ACCOUNT_UPDATE_COUNTER.inc();
-        let timer = ACCOUNT_UPDATE_HISTOGRAM
-            .with_label_values(&["all"])
-            .start_timer();
-
         let data = self.data.as_ref().expect("plugin must be initialized");
         match account {
             ReplicaAccountInfoVersions::V0_0_1(account) => {
@@ -330,8 +307,6 @@ impl GeyserPlugin for Plugin {
                     );
                     return Ok(());
                 }
-
-                ACCOUNT_UPDATE.with_label_values(&[&bs58::encode(account.pubkey).into_string()]);
 
                 // Select only accounts configured to look at, plus writes to accounts
                 // that were previously selected (to catch closures and account reuse)
@@ -390,10 +365,10 @@ impl GeyserPlugin for Plugin {
                     data: account_data,
                     is_selected,
                 }));
+
+                BROADCAST_ACCOUNTS_TOTAL.inc();
             }
         }
-
-        timer.observe_duration();
 
         Ok(())
     }
@@ -404,35 +379,30 @@ impl GeyserPlugin for Plugin {
         parent: Option<u64>,
         status: SlotStatus,
     ) -> PluginResult<()> {
-        SLOT_UPDATE_COUNTER.inc();
-        let timer = SLOT_UPDATE_HISTOGRAM
-            .with_label_values(&["all"])
-            .start_timer();
-
-        SLOT_UPDATE.with_label_values(&[&slot.to_string()]);
-
         let data = self.data.as_ref().expect("plugin must be initialized");
         debug!("Updating slot {:?} at with status {:?}", slot, status);
 
-        let status = match status {
-            SlotStatus::Processed => SlotUpdateStatus::Processed,
-            SlotStatus::Confirmed => SlotUpdateStatus::Confirmed,
-            SlotStatus::Rooted => SlotUpdateStatus::Rooted,
+        let (status, label) = match status {
+            SlotStatus::Processed => (SlotUpdateStatus::Processed, "processed"),
+            SlotStatus::Confirmed => (SlotUpdateStatus::Confirmed, "confirmed"),
+            SlotStatus::Rooted => (SlotUpdateStatus::Rooted, "rooted"),
         };
+
         data.broadcast(UpdateOneof::SlotUpdate(SlotUpdate {
             slot,
             parent,
             status: status as i32,
         }));
 
-        timer.observe_duration();
+        SLOTS_LAST_PROCESSED
+            .with_label_values(&[label])
+            .set(slot as i64);
+        BROADCAST_SLOTS_TOTAL.with_label_values(&[label]).inc();
 
         Ok(())
     }
 
     fn notify_end_of_startup(&mut self) -> PluginResult<()> {
-        END_OF_STARTUP.inc();
-
         Ok(())
     }
 }
