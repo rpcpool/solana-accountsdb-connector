@@ -1,4 +1,5 @@
 use {
+    crate::version::VERSION as VERSION_INFO,
     hyper::{
         service::{make_service_fn, service_fn},
         Body, Request, Response, Server,
@@ -6,24 +7,32 @@ use {
     log::*,
     prometheus::{
         labels, opts, register_counter, register_histogram_vec, Counter, Encoder, HistogramVec,
-        IntGaugeVec, Opts, Registry, TextEncoder,
+        IntCounterVec, IntGaugeVec, Opts, Registry, TextEncoder,
     },
     serde::{Deserialize, Serialize},
-    std::net::{IpAddr, Ipv4Addr, SocketAddr},
+    std::{
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+        sync::Once,
+    },
     tokio::runtime::Runtime,
 };
 
 lazy_static::lazy_static! {
-    pub(crate) static ref REGISTRY: Registry = Registry::new();
+    pub static ref REGISTRY: Registry = Registry::new();
 
-    pub(crate) static ref ONLOAD_COUNTER: Counter = register_counter!(opts!(
+    static ref VERSION: IntCounterVec = IntCounterVec::new(
+        Opts::new("version", "Plugin version info"),
+        &["key", "value"]
+    ).unwrap();
+
+    pub static ref ONLOAD_COUNTER: Counter = register_counter!(opts!(
         "onload_count",
         "Number of times `onload()` method was called.",
         labels! {"handler" => "all",}
     ))
     .unwrap();
 
-    pub(crate) static ref ONLOAD_HISTOGRAM: HistogramVec = register_histogram_vec!(
+    pub static ref ONLOAD_HISTOGRAM: HistogramVec = register_histogram_vec!(
         "plugin_loading_duration",
         "The latencies in seconds for performing plugin initialization.",
         &["handler"]
@@ -31,14 +40,14 @@ lazy_static::lazy_static! {
     .unwrap();
 
 
-    pub(crate) static ref UNLOAD_COUNTER: Counter = register_counter!(opts!(
+    pub static ref UNLOAD_COUNTER: Counter = register_counter!(opts!(
         "unload_count",
         "Number of times `unload()` method was called.",
         labels! {"handler" => "all",}
     ))
     .unwrap();
 
-    pub(crate) static ref UNLOAD_HISTOGRAM: HistogramVec = register_histogram_vec!(
+    pub static ref UNLOAD_HISTOGRAM: HistogramVec = register_histogram_vec!(
         "plugin_unloading_duration",
         "The latencies in seconds for performing plugin unwinding.",
         &["handler"]
@@ -46,14 +55,14 @@ lazy_static::lazy_static! {
     .unwrap();
 
 
-    pub(crate) static ref ACCOUNT_UPDATE_COUNTER: Counter = register_counter!(opts!(
+    pub static ref ACCOUNT_UPDATE_COUNTER: Counter = register_counter!(opts!(
         "unload_count",
         "Number of times `unload()` method was called.",
         labels! {"handler" => "all",}
     ))
     .unwrap();
 
-    pub(crate) static ref ACCOUNT_UPDATE_HISTOGRAM: HistogramVec = register_histogram_vec!(
+    pub static ref ACCOUNT_UPDATE_HISTOGRAM: HistogramVec = register_histogram_vec!(
         "plugin_unloading_duration",
         "The latencies in seconds for performing plugin unwinding.",
         &["handler"]
@@ -61,19 +70,19 @@ lazy_static::lazy_static! {
     .unwrap();
 
 
-    pub(crate) static ref ACCOUNT_UPDATE: IntGaugeVec = IntGaugeVec::new(
+    pub static ref ACCOUNT_UPDATE: IntGaugeVec = IntGaugeVec::new(
         Opts::new("account_info", "An account has been updated"),
         &["type"]
     ).unwrap();
 
-    pub(crate) static ref SLOT_UPDATE_COUNTER: Counter = register_counter!(opts!(
+    pub static ref SLOT_UPDATE_COUNTER: Counter = register_counter!(opts!(
         "slot_update_count",
         "Number of times slot was update.",
         labels! {"handler" => "all",}
     ))
     .unwrap();
 
-    pub(crate) static ref SLOT_UPDATE_HISTOGRAM: HistogramVec = register_histogram_vec!(
+    pub static ref SLOT_UPDATE_HISTOGRAM: HistogramVec = register_histogram_vec!(
         "slot_update_duration",
         "The latencies in seconds for performing of a slot update.",
         &["handler"]
@@ -81,12 +90,12 @@ lazy_static::lazy_static! {
     .unwrap();
 
 
-    pub(crate) static ref SLOT_UPDATE: IntGaugeVec = IntGaugeVec::new(
+    pub static ref SLOT_UPDATE: IntGaugeVec = IntGaugeVec::new(
         Opts::new("slot_no", "A slot has been updated"),
         &["type"]
     ).unwrap();
 
-    pub(crate) static ref END_OF_STARTUP: Counter = register_counter!(opts!(
+    pub static ref END_OF_STARTUP: Counter = register_counter!(opts!(
         "startup_finished",
         "Startup finished notification received",
         labels! {"handler" => "all",}
@@ -149,8 +158,8 @@ async fn serve_metrics(_req: Request<Body>) -> Result<Response<Body>, hyper::htt
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PrometheusConfig {
-    pub(crate) ip: String,
-    pub(crate) port: u16,
+    pub ip: String,
+    pub port: u16,
 }
 
 impl PrometheusConfig {
@@ -165,5 +174,34 @@ impl PrometheusConfig {
         };
 
         SocketAddr::new(IpAddr::V4(ip), self.port)
+    }
+}
+
+#[derive(Debug)]
+pub struct PrometheusService;
+
+impl PrometheusService {
+    pub fn register() {
+        static REGISTER: Once = Once::new();
+        REGISTER.call_once(|| {
+            macro_rules! register {
+                ($collector:ident) => {
+                    REGISTRY
+                        .register(Box::new($collector.clone()))
+                        .expect("collector can't be registered");
+                };
+            }
+            register!(VERSION);
+
+            for (key, value) in &[
+                ("version", VERSION_INFO.version),
+                ("solana", VERSION_INFO.solana),
+                ("git", VERSION_INFO.git),
+                ("rustc", VERSION_INFO.rustc),
+                ("buildts", VERSION_INFO.buildts),
+            ] {
+                VERSION.with_label_values(&[key, value]).inc()
+            }
+        });
     }
 }

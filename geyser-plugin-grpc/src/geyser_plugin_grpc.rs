@@ -3,9 +3,10 @@ use {
         accounts_selector::AccountsSelector,
         compression::zstd_compress,
         prom::{
-            PrometheusConfig, ACCOUNT_UPDATE, ACCOUNT_UPDATE_COUNTER, ACCOUNT_UPDATE_HISTOGRAM,
-            END_OF_STARTUP, ONLOAD_COUNTER, ONLOAD_HISTOGRAM, SLOT_UPDATE, SLOT_UPDATE_COUNTER,
-            SLOT_UPDATE_HISTOGRAM, UNLOAD_COUNTER, UNLOAD_HISTOGRAM,
+            PrometheusConfig, PrometheusService, ACCOUNT_UPDATE, ACCOUNT_UPDATE_COUNTER,
+            ACCOUNT_UPDATE_HISTOGRAM, END_OF_STARTUP, ONLOAD_COUNTER, ONLOAD_HISTOGRAM,
+            SLOT_UPDATE, SLOT_UPDATE_COUNTER, SLOT_UPDATE_HISTOGRAM, UNLOAD_COUNTER,
+            UNLOAD_HISTOGRAM,
         },
     },
     geyser_proto::{
@@ -13,7 +14,6 @@ use {
         SlotUpdate, SubscribeRequest, SubscribeResponse, Update, UpdateAccountsSelectorRequest,
         UpdateAccountsSelectorResponse,
     },
-    lazy_static::lazy_static,
     log::*,
     serde_derive::Deserialize,
     solana_geyser_plugin_interface::geyser_plugin_interface::{
@@ -38,7 +38,7 @@ use {
     tonic::transport::Server,
 };
 
-lazy_static! {
+lazy_static::lazy_static! {
     pub(crate) static ref CHANNEL: (Sender<()>, TokioRwLock<Receiver<()>>) = {
         let (sender, receiver) = mpsc::channel::<()>(100);
 
@@ -206,6 +206,8 @@ impl GeyserPlugin for Plugin {
     }
 
     fn on_load(&mut self, config_file: &str) -> PluginResult<()> {
+        PrometheusService::register();
+
         ONLOAD_COUNTER.inc();
         let timer = ONLOAD_HISTOGRAM.with_label_values(&["all"]).start_timer();
 

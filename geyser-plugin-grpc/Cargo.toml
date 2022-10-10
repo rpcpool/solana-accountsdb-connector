@@ -42,7 +42,11 @@ lazy_static = "1.4.0"
 hyper = { version = "0.14.20", features = ["server", "http1", "tcp"] }
 
 [build-dependencies]
+anyhow = "1"
+cargo-lock = "8"
+git-version = "0.3"
 tonic-build = { version = "0.6", features = ["compression"] }
+vergen = "=7.2.1"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
