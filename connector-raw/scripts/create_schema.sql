@@ -32,6 +32,7 @@ CREATE TABLE account_write (
 );
 CREATE INDEX account_write_searchkey on account_write(pubkey, slot DESC);
 CREATE INDEX account_write_pubkey_id_idx on account_write(pubkey);
+CREATE INDEX account_owner_pubkey_id_idx ON public.account_write USING btree (pubkey, owner);
 
 -- The table storing slot information
 CREATE TABLE slot (
