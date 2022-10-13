@@ -8,11 +8,10 @@ use {
     },
     geyser_proto::{
         slot_update::Status as SlotUpdateStatus, update::UpdateOneof, AccountWrite, Ping,
-        SlotUpdate, SubscribeRequest, SubscribeResponse, Update, UpdateAccountsSelectorRequest,
-        UpdateAccountsSelectorResponse,
+        SlotUpdate, Update,
     },
     log::*,
-    serde_derive::Deserialize,
+    serde::Deserialize,
     solana_geyser_plugin_interface::geyser_plugin_interface::{
         GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions, Result as PluginResult,
         SlotStatus,
@@ -27,7 +26,7 @@ use {
             Arc, RwLock,
         },
     },
-    tokio::sync::{broadcast, mpsc},
+    tokio::sync::broadcast,
     tonic::transport::Server,
 };
 
@@ -36,9 +35,20 @@ pub mod geyser_proto {
 }
 
 pub mod geyser_service {
-    use super::*;
     use {
-        geyser_proto::accounts_db_server::AccountsDb,
+        super::geyser_proto::{
+            accounts_db_server::AccountsDb, update::UpdateOneof, SubscribeRequest,
+            SubscribeResponse, Update, UpdateAccountsSelectorRequest,
+            UpdateAccountsSelectorResponse,
+        },
+        crate::accounts_selector::AccountsSelector,
+        log::*,
+        serde::Deserialize,
+        std::sync::{
+            atomic::{AtomicU64, Ordering},
+            Arc, RwLock,
+        },
+        tokio::sync::{broadcast, mpsc},
         tokio_stream::wrappers::ReceiverStream,
         tonic::{Code, Request, Response, Status},
     };
@@ -116,13 +126,12 @@ pub mod geyser_service {
         async fn update_accounts_selector(
             &self,
             request: Request<UpdateAccountsSelectorRequest>,
-        ) -> Result<Response<geyser_proto::UpdateAccountsSelectorResponse>, Status> {
+        ) -> Result<Response<UpdateAccountsSelectorResponse>, Status> {
             let (is_ok, error_message) =
                 match serde_json::from_str::<serde_json::Value>(&request.get_ref().config)
                     .map_err(|error| error.to_string())
                     .and_then(|config| {
-                        Plugin::create_accounts_selector_from_config(&config)
-                            .map_err(|error| error.to_string())
+                        AccountsSelector::from_config(&config).map_err(|error| error.to_string())
                     }) {
                     Ok(accounts_selector_new) => {
                         *self.accounts_selector.write().unwrap() = accounts_selector_new;
@@ -207,7 +216,7 @@ impl GeyserPlugin for Plugin {
 
         let result: serde_json::Value = serde_json::from_str(&contents).unwrap();
         let accounts_selector = Arc::new(RwLock::new(
-            Self::create_accounts_selector_from_config(&result["accounts_selector"]).unwrap(),
+            AccountsSelector::from_config(&result["accounts_selector"]).unwrap(),
         ));
 
         let config: PluginConfig = serde_json::from_str(&contents).map_err(|err| {
@@ -405,50 +414,6 @@ impl GeyserPlugin for Plugin {
     }
 }
 
-impl Plugin {
-    pub fn create_accounts_selector_from_config(
-        accounts_selector: &serde_json::Value,
-    ) -> anyhow::Result<AccountsSelector> {
-        Ok(if accounts_selector.is_null() {
-            AccountsSelector::default()
-        } else {
-            let accounts = &accounts_selector["accounts"];
-            let accounts = accounts
-                .as_array()
-                .map(|accounts| {
-                    accounts
-                        .iter()
-                        .map(|account| {
-                            account.as_str().ok_or_else(|| {
-                                anyhow::anyhow!("Expected `account` Pubkey as String")
-                            })
-                        })
-                        .collect::<Result<Vec<&str>, _>>()
-                })
-                .transpose()?
-                .unwrap_or_default();
-
-            let owners = &accounts_selector["owners"];
-            let owners = owners
-                .as_array()
-                .map(|owners| {
-                    owners
-                        .iter()
-                        .map(|account| {
-                            account
-                                .as_str()
-                                .ok_or_else(|| anyhow::anyhow!("Expected `owner` Pubkey as String"))
-                        })
-                        .collect::<Result<Vec<&str>, _>>()
-                })
-                .transpose()?
-                .unwrap_or_default();
-
-            AccountsSelector::new(&accounts, &owners)?
-        })
-    }
-}
-
 #[no_mangle]
 #[allow(improper_ctypes_definitions)]
 /// # Safety
@@ -471,6 +436,6 @@ pub(crate) mod tests {
         }}";
 
         let config: serde_json::Value = serde_json::from_str(config).unwrap();
-        Plugin::create_accounts_selector_from_config(&config["accounts_selector"]).unwrap();
+        AccountsSelector::from_config(&config["accounts_selector"]).unwrap();
     }
 }

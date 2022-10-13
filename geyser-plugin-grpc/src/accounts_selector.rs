@@ -42,6 +42,46 @@ impl AccountsSelector {
         })
     }
 
+    pub fn from_config(config: &serde_json::Value) -> anyhow::Result<AccountsSelector> {
+        Ok(if config.is_null() {
+            AccountsSelector::default()
+        } else {
+            let accounts = &config["accounts"];
+            let accounts = accounts
+                .as_array()
+                .map(|accounts| {
+                    accounts
+                        .iter()
+                        .map(|account| {
+                            account.as_str().ok_or_else(|| {
+                                anyhow::anyhow!("Expected `account` Pubkey as String")
+                            })
+                        })
+                        .collect::<Result<Vec<&str>, _>>()
+                })
+                .transpose()?
+                .unwrap_or_default();
+
+            let owners = &config["owners"];
+            let owners = owners
+                .as_array()
+                .map(|owners| {
+                    owners
+                        .iter()
+                        .map(|account| {
+                            account
+                                .as_str()
+                                .ok_or_else(|| anyhow::anyhow!("Expected `owner` Pubkey as String"))
+                        })
+                        .collect::<Result<Vec<&str>, _>>()
+                })
+                .transpose()?
+                .unwrap_or_default();
+
+            AccountsSelector::new(&accounts, &owners)?
+        })
+    }
+
     pub fn is_account_selected(&self, account: &[u8], owner: &[u8]) -> bool {
         self.select_all_accounts || self.accounts.contains(account) || self.owners.contains(owner)
     }
