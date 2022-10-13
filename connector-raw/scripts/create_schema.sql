@@ -30,9 +30,8 @@ CREATE TABLE account_write (
     data BYTEA,
     PRIMARY KEY (pubkey, slot)
 );
-CREATE INDEX account_write_searchkey on account_write(pubkey, slot DESC);
-CREATE INDEX account_write_pubkey_id_idx on account_write(pubkey);
-CREATE INDEX account_owner_pubkey_id_idx ON public.account_write USING btree (pubkey, owner);
+CREATE INDEX account_write_owner_slot on account_write(owner, slot DESC);
+CREATE INDEX account_write_slot_owner on account_write(slot, owner);
 
 -- The table storing slot information
 CREATE TABLE slot (
