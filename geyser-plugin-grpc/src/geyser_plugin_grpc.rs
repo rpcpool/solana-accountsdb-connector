@@ -176,6 +176,7 @@ pub struct PluginConfig {
     pub bind_address: String,
     pub service_config: geyser_service::ServiceConfig,
     pub zstd_compression: bool,
+    #[serde(default)]
     pub prometheus: Option<PrometheusConfig>,
 }
 
