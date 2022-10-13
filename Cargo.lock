@@ -4841,11 +4841,9 @@ name = "solana-geyser-connector-plugin-grpc"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-stream 0.2.1",
  "bs58 0.4.0",
  "cargo-lock",
- "futures-core",
- "futures-util",
+ "futures 0.3.23",
  "git-version",
  "hyper 0.14.20",
  "lazy_static",
@@ -4866,7 +4864,6 @@ dependencies = [
  "tonic-build 0.6.2",
  "vergen",
  "zstd",
- "zstd-safe",
 ]
 
 [[package]]

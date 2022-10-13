@@ -1,19 +1,21 @@
-use rand::Rng;
-use tokio::sync::{broadcast, mpsc};
-use tonic::transport::Server;
+use {
+    geyser_proto::{update::UpdateOneof, SlotUpdate, Update},
+    rand::Rng,
+    tokio::time::{sleep, Duration},
+    tonic::transport::Server,
+};
 
 pub mod geyser_proto {
     tonic::include_proto!("accountsdb");
 }
-use geyser_proto::{
-    update::UpdateOneof, SlotUpdate, SubscribeRequest, Update, UpdateAccountsSelectorRequest,
-    UpdateAccountsSelectorResponse,
-};
 
 pub mod geyser_service {
-    use super::*;
     use {
-        geyser_proto::accounts_db_server::AccountsDb,
+        super::geyser_proto::{
+            accounts_db_server::AccountsDb, SubscribeRequest, Update,
+            UpdateAccountsSelectorRequest, UpdateAccountsSelectorResponse,
+        },
+        tokio::sync::{broadcast, mpsc},
         tokio_stream::wrappers::ReceiverStream,
         tonic::{Request, Response, Status},
     };
@@ -53,7 +55,7 @@ pub mod geyser_service {
         async fn update_accounts_selector(
             &self,
             _request: Request<UpdateAccountsSelectorRequest>,
-        ) -> Result<Response<geyser_proto::UpdateAccountsSelectorResponse>, Status> {
+        ) -> Result<Response<UpdateAccountsSelectorResponse>, Status> {
             Ok(Response::new(UpdateAccountsSelectorResponse {
                 is_ok: true,
                 error_message: String::new(),
@@ -87,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     })
                     .unwrap();
             }
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            sleep(Duration::from_secs(1)).await;
         }
     });
 

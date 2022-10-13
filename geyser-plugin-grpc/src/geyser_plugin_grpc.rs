@@ -1,7 +1,6 @@
 use {
     crate::{
         accounts_selector::AccountsSelector,
-        compression::zstd_compress,
         prom::{
             PrometheusConfig, PrometheusService, BROADCAST_ACCOUNTS_TOTAL, BROADCAST_SLOTS_TOTAL,
             SLOTS_LAST_PROCESSED,
@@ -339,20 +338,18 @@ impl GeyserPlugin for Plugin {
                     slot,
                 );
 
-                let mut account_data = account.data.to_vec();
-
-                //zstd compress if enabled.
-                if data.zstd_compression {
-                    match zstd_compress(&account_data) {
-                        Ok(res) => account_data = res,
-                        Err(e) => {
-                            println!(
-                                "zstd_decompress compression failed = {:?} , using original data.",
-                                e
-                            );
+                // zstd compress if enabled
+                let account_data = if data.zstd_compression {
+                    match zstd::encode_all(account.data, 0) {
+                        Ok(vec) => vec,
+                        Err(error) => {
+                            error!("zstd_decompress compression failed: {:?}", error);
+                            account.data.to_vec()
                         }
                     }
-                }
+                } else {
+                    account.data.to_vec()
+                };
 
                 data.broadcast(UpdateOneof::AccountWrite(AccountWrite {
                     slot,

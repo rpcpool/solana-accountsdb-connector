@@ -1,6 +1,6 @@
 use {
     crate::version::VERSION as VERSION_INFO,
-    futures_util::FutureExt,
+    futures::future::FutureExt,
     hyper::{
         server::conn::AddrStream,
         service::{make_service_fn, service_fn},
