@@ -41,3 +41,4 @@ CREATE TABLE slot (
     status "SlotStatus" NOT NULL
 );
 CREATE INDEX ON slot (parent);
+CREATE INDEX ON slot (status);
