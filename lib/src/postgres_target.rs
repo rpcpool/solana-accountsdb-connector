@@ -245,11 +245,10 @@ impl SlotsProcessing {
                 )
                 .await?;
                 tx.query("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Confirmed')", &[&slot_no]).await?;
-                tx.query(
-                    "DELETE FROM slot WHERE slot < $1 AND status = 'Confirmed'",
-                    &[&slot_no],
-                )
-                .await?;
+                tx.query("DELETE FROM slot WHERE slot < $1", &[&slot_no])
+                    .await?;
+                tx.query("DELETE FROM account_write WHERE pubkey IN (SELECT DISTINCT pubkey FROM account_write WHERE slot = $1) AND slot < $1", &[&slot_no])
+                    .await?;
 
                 tx.into_inner().commit().await?;
             }
