@@ -1,6 +1,6 @@
 use {
     crate::{
-        accounts_selector::AccountsSelector,
+        accounts_selector::{AccountsSelector, AccountsSelectorConfig},
         prom::{
             PrometheusConfig, PrometheusService, BROADCAST_ACCOUNTS_TOTAL, BROADCAST_SLOTS_TOTAL,
             SLOTS_LAST_PROCESSED,
@@ -19,14 +19,16 @@ use {
     std::{
         collections::HashSet,
         convert::TryInto,
-        fs::File,
-        io::Read,
+        fs::read_to_string,
         sync::{
             atomic::{AtomicU64, Ordering},
             Arc, RwLock,
         },
     },
-    tokio::sync::broadcast,
+    tokio::{
+        sync::broadcast,
+        time::{sleep, Duration},
+    },
     tonic::transport::Server,
 };
 
@@ -41,7 +43,7 @@ pub mod geyser_service {
             SubscribeResponse, Update, UpdateAccountsSelectorRequest,
             UpdateAccountsSelectorResponse,
         },
-        crate::accounts_selector::AccountsSelector,
+        crate::accounts_selector::{AccountsSelector, AccountsSelectorConfig},
         log::*,
         serde::Deserialize,
         std::sync::{
@@ -128,7 +130,7 @@ pub mod geyser_service {
             request: Request<UpdateAccountsSelectorRequest>,
         ) -> Result<Response<UpdateAccountsSelectorResponse>, Status> {
             let (is_ok, error_message) =
-                match serde_json::from_str::<serde_json::Value>(&request.get_ref().config)
+                match serde_json::from_str::<AccountsSelectorConfig>(&request.get_ref().config)
                     .map_err(|error| error.to_string())
                     .and_then(|config| {
                         AccountsSelector::from_config(&config).map_err(|error| error.to_string())
@@ -148,7 +150,19 @@ pub mod geyser_service {
     }
 }
 
-pub struct PluginData {
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginConfig {
+    pub bind_address: String,
+    pub accounts_selector: AccountsSelectorConfig,
+    pub service_config: geyser_service::ServiceConfig,
+    pub zstd_compression: bool,
+    #[serde(default)]
+    pub prometheus: Option<PrometheusConfig>,
+}
+
+#[derive(Debug)]
+pub struct PluginInner {
     runtime: tokio::runtime::Runtime,
     prometheus: PrometheusService,
     server_broadcast: broadcast::Sender<Update>,
@@ -166,35 +180,18 @@ pub struct PluginData {
     zstd_compression: bool,
 }
 
-#[derive(Default)]
-pub struct Plugin {
-    // initialized by on_load()
-    data: Option<PluginData>,
-}
-
-impl std::fmt::Debug for Plugin {
-    fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PluginConfig {
-    pub bind_address: String,
-    pub service_config: geyser_service::ServiceConfig,
-    pub zstd_compression: bool,
-    #[serde(default)]
-    pub prometheus: Option<PrometheusConfig>,
-}
-
-impl PluginData {
+impl PluginInner {
     fn broadcast(&self, update: UpdateOneof) {
         // Don't care about the error that happens when there are no receivers.
         let _ = self.server_broadcast.send(Update {
             update_oneof: Some(update),
         });
     }
+}
+
+#[derive(Debug, Default)]
+pub struct Plugin {
+    data: Option<PluginInner>,
 }
 
 impl GeyserPlugin for Plugin {
@@ -210,28 +207,20 @@ impl GeyserPlugin for Plugin {
             config_file
         );
 
-        let mut file = File::open(config_file)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-
-        let result: serde_json::Value = serde_json::from_str(&contents).unwrap();
-        let accounts_selector = Arc::new(RwLock::new(
-            AccountsSelector::from_config(&result["accounts_selector"]).unwrap(),
-        ));
-
-        let config: PluginConfig = serde_json::from_str(&contents).map_err(|err| {
+        let config = read_to_string(config_file).map_err(GeyserPluginError::ConfigFileOpenError)?;
+        let config: PluginConfig = serde_json::from_str(&config).map_err(|error| {
             GeyserPluginError::ConfigFileReadError {
-                msg: format!(
-                    "The config file is not in the JSON format expected: {:?}",
-                    err
-                ),
+                msg: format!("Failed to read config from the file: {:?}", error),
             }
         })?;
+        let accounts_selector = Arc::new(RwLock::new(
+            AccountsSelector::from_config(&config.accounts_selector).unwrap(),
+        ));
 
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let prometheus = PrometheusService::new(&runtime, config.prometheus);
 
-        let addr =
+        let bind_address =
             config
                 .bind_address
                 .parse()
@@ -253,7 +242,7 @@ impl GeyserPlugin for Plugin {
             .accept_gzip()
             .send_gzip();
         runtime.spawn(Server::builder().add_service(server).serve_with_shutdown(
-            addr,
+            bind_address,
             async move {
                 let _ = server_exit_receiver.recv().await;
             },
@@ -269,12 +258,12 @@ impl GeyserPlugin for Plugin {
 
                 tokio::select! {
                     _ = server_exit_receiver.recv() => { break; },
-                    _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {},
+                    _ = sleep(Duration::from_secs(5)) => {},
                 }
             }
         });
 
-        self.data = Some(PluginData {
+        self.data = Some(PluginInner {
             runtime,
             prometheus,
             server_broadcast,
@@ -294,9 +283,7 @@ impl GeyserPlugin for Plugin {
         let data = self.data.take().expect("plugin must be initialized");
 
         data.prometheus.shutdown();
-        data.server_exit_sender
-            .send(())
-            .expect("sending grpc server termination should succeed");
+        let _ = data.server_exit_sender.send(());
         data.runtime.shutdown_background();
     }
 
@@ -408,10 +395,6 @@ impl GeyserPlugin for Plugin {
 
         Ok(())
     }
-
-    fn notify_end_of_startup(&mut self) -> PluginResult<()> {
-        Ok(())
-    }
 }
 
 #[no_mangle]
@@ -423,19 +406,4 @@ pub unsafe extern "C" fn _create_plugin() -> *mut dyn GeyserPlugin {
     let plugin = Plugin::default();
     let plugin: Box<dyn GeyserPlugin> = Box::new(plugin);
     Box::into_raw(plugin)
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use {super::*, serde_json};
-
-    #[test]
-    fn test_accounts_selector_from_config() {
-        let config = "{\"accounts_selector\" : { \
-           \"owners\" : [\"9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin\"] \
-        }}";
-
-        let config: serde_json::Value = serde_json::from_str(config).unwrap();
-        AccountsSelector::from_config(&config["accounts_selector"]).unwrap();
-    }
 }
