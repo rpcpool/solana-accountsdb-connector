@@ -13,29 +13,29 @@ path = "src/test_server.rs"
 
 [dependencies]
 anyhow = "1"
-bs58 = "0.4.0"
+bs58 = "0.4"
 futures = "0.3"
-hyper = { version = "0.14.20", features = ["server", "http1", "tcp"] }
-lazy_static = "1.4.0"
-log = "0.4.14"
-prometheus = "0.13.2"
-prost = "0.9"
+hyper = { version = "0.14", features = ["server", "http1", "tcp"] }
+lazy_static = "1"
+log = "0.4"
+prometheus = "0.13"
+prost = "0.11"
 rand = "0.8"
-serde = { version = "1.0.130", features = ["derive"] }
-serde_json = "1.0.67"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 solana-geyser-plugin-interface = "=1.10.40"
 solana-logger = "=1.10.40"
 solana-sdk = "=1.10.40"
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tokio-stream = "0.1"
-tonic = { version = "0.6", features = ["compression"] }
-zstd = "0.11.2"
+tonic = { version = "0.8", features = ["gzip"] }
+zstd = "0.11"
 
 [build-dependencies]
 anyhow = "1"
 cargo-lock = "8"
 git-version = "0.3"
-tonic-build = { version = "0.6", features = ["compression"] }
+tonic-build = "0.8"
 vergen = "=7.2.1"
 
 [package.metadata.docs.rs]

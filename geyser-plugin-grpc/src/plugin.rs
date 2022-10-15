@@ -34,7 +34,7 @@ use {
         sync::{broadcast, mpsc},
         time::{sleep, Duration},
     },
-    tonic::transport::Server,
+    tonic::{codec::CompressionEncoding, transport::Server},
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -122,7 +122,11 @@ impl GeyserPlugin for Plugin {
         let mut server_exit_receiver = server_exit_sender.subscribe();
         runtime.spawn(
             Server::builder()
-                .add_service(AccountsDbServer::new(service).accept_gzip().send_gzip())
+                .add_service(
+                    AccountsDbServer::new(service)
+                        .accept_compressed(CompressionEncoding::Gzip)
+                        .send_compressed(CompressionEncoding::Gzip),
+                )
                 .serve_with_shutdown(config.bind_address, async move {
                     let _ = server_exit_receiver.recv().await;
                 }),

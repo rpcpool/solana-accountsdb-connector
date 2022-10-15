@@ -12,7 +12,7 @@ use {
     },
     tokio::sync::{broadcast, mpsc},
     tokio_stream::wrappers::ReceiverStream,
-    tonic::{Code, Request, Response, Status},
+    tonic::{Code, Request, Response, Result as TonicResult, Status},
 };
 
 pub mod proto {
@@ -53,12 +53,12 @@ impl Service {
 
 #[tonic::async_trait]
 impl AccountsDb for Service {
-    type SubscribeStream = ReceiverStream<Result<Update, Status>>;
+    type SubscribeStream = ReceiverStream<TonicResult<Update>>;
 
     async fn subscribe(
         &self,
         _request: Request<SubscribeRequest>,
-    ) -> Result<Response<Self::SubscribeStream>, Status> {
+    ) -> TonicResult<Response<Self::SubscribeStream>> {
         let id = self.subscribe_id.fetch_add(1, Ordering::SeqCst);
         info!("{}, new subscriber", id);
 
@@ -98,7 +98,7 @@ impl AccountsDb for Service {
     async fn update_accounts_selector(
         &self,
         request: Request<UpdateAccountsSelectorRequest>,
-    ) -> Result<Response<UpdateAccountsSelectorResponse>, Status> {
+    ) -> TonicResult<Response<UpdateAccountsSelectorResponse>> {
         let (is_ok, error_message) =
             match serde_json::from_str::<AccountsSelectorConfig>(&request.get_ref().config)
                 .map_err(|error| error.to_string())
