@@ -4855,7 +4855,6 @@ dependencies = [
  "serde_json",
  "solana-geyser-plugin-interface",
  "solana-logger",
- "solana-metrics",
  "solana-sdk",
  "tokio",
  "tokio-stream",
