@@ -5,7 +5,6 @@
         },
         "bind_address": "[::1]:10000",
         "service_config": {
-                "broadcast_buffer_size": 10000,
-                "subscriber_buffer_size": 10000
+                "channel_capacity": 100000
         }
 }
