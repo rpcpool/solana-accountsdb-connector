@@ -1,5 +1,6 @@
 [workspace]
 members = [
+        "geyser-grpc-public",
         "geyser-plugin-grpc",
         "lib",
         "connector-raw",
