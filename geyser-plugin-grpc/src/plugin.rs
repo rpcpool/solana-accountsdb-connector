@@ -20,8 +20,6 @@ use {
         SlotStatus,
     },
     std::{
-        collections::HashSet,
-        convert::TryInto,
         fs::read_to_string,
         net::SocketAddr,
         sync::{
@@ -56,10 +54,6 @@ pub struct PluginInner {
     accounts_selector_rx: mpsc::UnboundedReceiver<AccountsSelector>,
     /// Largest slot that an account write was processed for
     highest_write_slot: Arc<AtomicU64>,
-    /// Accounts that saw account writes
-    /// Needed to catch writes that signal account closure, where
-    /// lamports=0 and owner=system-program.
-    active_accounts: HashSet<[u8; 32]>,
     server_broadcast_tx: broadcast::Sender<Update>,
     server_exit_sender: broadcast::Sender<()>,
     prometheus: PrometheusService,
@@ -156,7 +150,6 @@ impl GeyserPlugin for Plugin {
             accounts_selector,
             accounts_selector_rx,
             highest_write_slot,
-            active_accounts: HashSet::new(),
             server_broadcast_tx,
             server_exit_sender,
             prometheus,
@@ -184,19 +177,11 @@ impl GeyserPlugin for Plugin {
         let inner = self.inner.as_mut().expect("plugin must be initialized");
         match account {
             ReplicaAccountInfoVersions::V0_0_1(account) => {
-                // Select only accounts configured to look at, plus writes to accounts
-                // that were previously selected (to catch closures and account reuse)
-                let is_selected = inner
+                if !inner
                     .accounts_selector
-                    .is_account_selected(account.pubkey, account.owner);
-                let previously_selected = inner.active_accounts.contains(&account.pubkey[0..32]);
-                if !is_selected && !previously_selected {
+                    .is_account_selected(account.pubkey, account.owner)
+                {
                     return Ok(());
-                }
-                if !previously_selected {
-                    inner
-                        .active_accounts
-                        .insert(account.pubkey.try_into().unwrap());
                 }
 
                 inner.highest_write_slot.fetch_max(slot, Ordering::Relaxed);
@@ -224,7 +209,6 @@ impl GeyserPlugin for Plugin {
                     data,
                     write_version: account.write_version,
                     is_startup,
-                    is_selected,
                 }));
 
                 BROADCAST_ACCOUNTS_TOTAL.inc();
