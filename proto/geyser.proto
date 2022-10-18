@@ -24,6 +24,9 @@ message Update {
 }
 
 message AccountWrite {
+  // removed field `is_selected`
+  reserved 10;
+
   uint64 slot = 1;
   bytes pubkey = 2;
   uint64 lamports = 3;

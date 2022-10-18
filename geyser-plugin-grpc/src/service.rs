@@ -75,7 +75,7 @@ impl AccountsDb for Service {
                 .chain(BroadcastStream::new(self.updates_tx.subscribe()))
                 .map_err(move |error| {
                     warn!(
-                        "{}, error while receiving message to be broadcast: {:?}",
+                        "{}, error while receiving message from the channel: {:?}",
                         id, error
                     );
                     Status::new(Code::Internal, error.to_string())
