@@ -32,7 +32,9 @@ async fn feed_data(
     config: &SourceConfig,
     sender: async_channel::Sender<WebsocketMessage>,
 ) -> anyhow::Result<()> {
-    let program_id = Pubkey::from_str(&config.snapshot.program_id)?;
+    // let program_id = Pubkey::from_str(&config.snapshot.program_id)?;
+    let program_id = Pubkey::default();
+    todo!();
     let snapshot_duration = Duration::from_secs(300);
 
     let connect = ws::try_connect::<RpcSolPubSubClient>(&config.rpc_ws_url).map_err_anyhow()?;

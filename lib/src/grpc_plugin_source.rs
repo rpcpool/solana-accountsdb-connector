@@ -68,7 +68,12 @@ async fn feed_data_geyser(
     snapshot_config: &SnapshotSourceConfig,
     sender: async_channel::Sender<Message>,
 ) -> anyhow::Result<()> {
-    let program_id = Pubkey::from_str(&snapshot_config.program_id)?;
+    // let program_id = Pubkey::from_str(&snapshot_config.program_id)?;
+    let program_ids = snapshot_config
+        .program_id
+        .iter()
+        .map(|input| Pubkey::from_str(input))
+        .collect::<Result<Vec<_>, _>>()?;
 
     let endpoint = Endpoint::from_str(&grpc_config.connection_string)?;
     let channel = if let Some(tls) = tls_config {
@@ -160,7 +165,10 @@ async fn feed_data_geyser(
                             }
                             if snapshot_needed && max_rooted_slot - rooted_to_finalized_slots > first_full_slot {
                                 snapshot_needed = false;
-                                snapshot_future = tokio::spawn(get_snapshot(snapshot_config.rpc_http_url.clone(), program_id)).fuse();
+                                // snapshot_future = tokio::spawn(get_snapshot(snapshot_config.rpc_http_url.clone(), program_ids)).fuse();
+                                snapshot_future = future::try_join_all(program_ids.iter().copied().map(|program_id| {
+                                    get_snapshot(snapshot_config.rpc_http_url.clone(), program_id)
+                                })).fuse();
                             }
                         }
                     },
@@ -201,26 +209,27 @@ async fn feed_data_geyser(
                 sender.send(Message::GrpcUpdate(update)).await.expect("send success");
             },
             snapshot = &mut snapshot_future => {
-                let snapshot = snapshot??;
-                if let OptionalContext::Context(snapshot_data) = snapshot {
-                    info!("snapshot is for slot {}, first full slot was {}", snapshot_data.context.slot, first_full_slot);
-                    if snapshot_data.context.slot >= first_full_slot {
-                        sender
-                        .send(Message::Snapshot(snapshot_data))
-                        .await
-                        .expect("send success");
+                for snapshot in snapshot? {
+                    if let OptionalContext::Context(snapshot_data) = snapshot {
+                        info!("snapshot is for slot {}, first full slot was {}", snapshot_data.context.slot, first_full_slot);
+                        if snapshot_data.context.slot >= first_full_slot {
+                            sender
+                            .send(Message::Snapshot(snapshot_data))
+                            .await
+                            .expect("send success");
+                        } else {
+                            info!(
+                                "snapshot is too old: has slot {}, expected {} minimum",
+                                snapshot_data.context.slot,
+                                first_full_slot
+                            );
+                            // try again in another 10 slots
+                            snapshot_needed = true;
+                            rooted_to_finalized_slots += 10;
+                        }
                     } else {
-                        info!(
-                            "snapshot is too old: has slot {}, expected {} minimum",
-                            snapshot_data.context.slot,
-                            first_full_slot
-                        );
-                        // try again in another 10 slots
-                        snapshot_needed = true;
-                        rooted_to_finalized_slots += 10;
+                        anyhow::bail!("bad snapshot format");
                     }
-                } else {
-                    anyhow::bail!("bad snapshot format");
                 }
             },
             _ = tokio::time::sleep(fatal_idle_timeout) => {
