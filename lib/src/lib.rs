@@ -175,10 +175,10 @@ impl AccountTable for RawAccountTable {
                 VALUES
                 ($pubkey, $slot, $is_selected,
                 $owner, $lamports, $executable, $rent_epoch, $data, $write_version)
-                ON CONFLICT (pubkey, slot)
+                ON CONFLICT (pubkey, slot, owner)
                 DO 
                 UPDATE SET
-                    is_selected = $is_selected, owner = $owner, lamports = $lamports, 
+                    is_selected = $is_selected, lamports = $lamports, 
                     executable = $executable , rent_epoch = $rent_epoch, 
                     data = $data, write_version= $write_version",
             pubkey,
