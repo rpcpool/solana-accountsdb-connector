@@ -119,7 +119,7 @@ pub struct SourceConfig {
 #[derive(Clone, Debug, Deserialize)]
 pub struct SnapshotSourceConfig {
     pub rpc_http_url: String,
-    pub program_id: String,
+    pub program_id: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

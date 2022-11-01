@@ -15,7 +15,7 @@ retry_connection_sleep_secs = 30
 
 [source.snapshot]
 rpc_http_url = ""
-program_id = ""
+program_id = [""]
 
 [postgres_target]
 connection_string =  "host=/var/run/postgresql"
