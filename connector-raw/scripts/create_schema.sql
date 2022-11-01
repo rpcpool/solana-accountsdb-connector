@@ -18,6 +18,25 @@ CREATE TABLE monitoring (
 );
 
 -- The table storing account writes, keeping only the newest write_version per slot
+CREATE TABLE account_write_partitioned (
+    pubkey VARCHAR NOT NULL,
+    slot BIGINT NOT NULL,
+    write_version BIGINT NOT NULL,
+    owner VARCHAR NOT NULL,
+    is_selected BOOL NOT NULL,
+    lamports BIGINT NOT NULL,
+    executable BOOL NOT NULL,
+    rent_epoch BIGINT NOT NULL,
+    data BYTEA,
+    PRIMARY KEY (pubkey, slot, owner)
+)
+    PARTITION BY list (owner);
+
+CREATE TABLE account_write_tokenkeg PARTITION OF account_write_partitioned
+    FOR VALUES IN ('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+
+CREATE TABLE account_write_default PARTITION of account_write_partitioned DEFAULT;
+
 CREATE TABLE account_write (
     pubkey VARCHAR NOT NULL,
     slot BIGINT NOT NULL,
@@ -30,6 +49,7 @@ CREATE TABLE account_write (
     data BYTEA,
     PRIMARY KEY (pubkey, slot)
 );
+
 CREATE INDEX account_write_owner_slot on account_write(owner, slot DESC);
 CREATE INDEX account_write_slot_owner on account_write(slot, owner);
 
