@@ -38,20 +38,15 @@ CREATE TABLE account_write_tokenkeg PARTITION OF account_write
 CREATE TABLE account_write_zeta PARTITION OF account_write
     FOR VALUES IN ('ZETAxsqBRek56DhiGXrn75yj2NHU3aYUnxvHXpkf3aD');
 
+CREATE TABLE account_write_stake PARTITION OF account_write
+    FOR VALUES IN ('Stake11111111111111111111111111111111111111');
+
 CREATE TABLE account_write_default PARTITION of account_write DEFAULT;
 
-CREATE TABLE account_write (
-    pubkey VARCHAR NOT NULL,
-    slot BIGINT NOT NULL,
-    write_version BIGINT NOT NULL,
-    owner VARCHAR NOT NULL,
-    is_selected BOOL NOT NULL,
-    lamports BIGINT NOT NULL,
-    executable BOOL NOT NULL,
-    rent_epoch BIGINT NOT NULL,
-    data BYTEA,
-    PRIMARY KEY (pubkey, slot)
-);
+create index owner_idx on account_write_tokenkeg (substring(data,33,32));
+
+create index mint_idx on account_write_tokenkeg (substring(data,1,32));
+
 
 CREATE INDEX account_write_owner_slot on account_write(owner, slot DESC);
 CREATE INDEX account_write_slot_owner on account_write(slot, owner);
