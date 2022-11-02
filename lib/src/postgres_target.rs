@@ -212,6 +212,13 @@ impl SlotsProcessing {
                 let tx = client.transaction().await?;
 
                 tx.query(
+                    "INSERT INTO slot_history(slot, parent, status) VALUES($1, $2, $3)",
+                    &[&slot_no, &parent, &status],
+                )
+                .await?;
+
+
+                tx.query(
                     "INSERT INTO slot(slot, parent, status) VALUES($1, $2, $3)",
                     &[&slot_no, &parent, &status],
                 )
@@ -221,6 +228,12 @@ impl SlotsProcessing {
             }
             pg::SlotStatus::Confirmed => {
                 let tx = client.transaction().await?;
+
+                tx.query(
+                    "UPDATE slot_history SET status = 'Confirmed' WHERE slot = $1",
+                    &[&slot_no],
+                )
+                .await?;
 
                 tx.query(
                     "UPDATE slot SET status = 'Confirmed' WHERE slot = $1",
@@ -240,6 +253,11 @@ impl SlotsProcessing {
                 let tx = client.transaction().await?;
 
                 tx.query(
+                    "UPDATE slot_history SET status = 'Rooted' WHERE slot = $1",
+                    &[&slot_no],
+                )
+                .await?;
+                tx.query(
                     "UPDATE slot SET status = 'Rooted' WHERE slot = $1",
                     &[&slot_no],
                 )
@@ -254,7 +272,7 @@ impl SlotsProcessing {
             }
         }
 
-        trace!("slot update done {}", update.slot);
+        info!("slot update done {} {:?}", update.slot, status);
         Ok(())
     }
 }
