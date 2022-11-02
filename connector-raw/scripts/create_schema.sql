@@ -43,8 +43,10 @@ CREATE TABLE account_write_stake PARTITION OF account_write
 
 CREATE TABLE account_write_default PARTITION of account_write DEFAULT;
 
+-- Substring index on offset 33 with length 32 (bytes) == Owner field for Tokenkeg
 create index owner_idx on account_write_tokenkeg (substring(data,33,32));
 
+-- Substring index on offset 1 with length 32 (bytes) == Mint field for Tokenkeg
 create index mint_idx on account_write_tokenkeg (substring(data,1,32));
 
 
@@ -59,3 +61,12 @@ CREATE TABLE slot (
 );
 CREATE INDEX ON slot (parent);
 CREATE INDEX ON slot (status);
+
+-- Keep all slots for debugging purposes
+CREATE TABLE slot_history (
+    slot BIGINT PRIMARY KEY,
+    parent BIGINT,
+    status "SlotStatus" NOT NULL
+);
+CREATE INDEX ON slot_history (parent);
+CREATE INDEX ON slot_history (status);
