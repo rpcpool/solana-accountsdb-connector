@@ -211,7 +211,14 @@ impl SlotsProcessing {
             pg::SlotStatus::Processed => {
                 let tx = client.transaction().await?;
 
-                tx.execute(
+                tx.query(
+                    "INSERT INTO slot_history(slot, parent, status) VALUES($1, $2, $3)",
+                    &[&slot_no, &parent, &status],
+                )
+                .await?;
+
+
+                tx.query(
                     "INSERT INTO slot(slot, parent, status) VALUES($1, $2, $3)",
                     &[&slot_no, &parent, &status],
                 )
@@ -222,15 +229,20 @@ impl SlotsProcessing {
             pg::SlotStatus::Confirmed => {
                 let tx = client.transaction().await?;
 
-                tx.execute("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Processed')", &[&slot_no]).await?;
-                tx.execute(
-                    "DELETE FROM slot WHERE slot < $1 AND status = 'Processed'",
+                tx.query(
+                    "UPDATE slot_history SET status = 'Confirmed' WHERE slot = $1",
                     &[&slot_no],
                 )
                 .await?;
 
-                tx.execute(
+                tx.query(
                     "UPDATE slot SET status = 'Confirmed' WHERE slot = $1",
+                    &[&slot_no],
+                )
+                .await?;
+                tx.query("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Processed')", &[&slot_no]).await?;
+                tx.query(
+                    "DELETE FROM slot WHERE slot < $1 AND status = 'Processed'",
                     &[&slot_no],
                 )
                 .await?;
@@ -240,23 +252,27 @@ impl SlotsProcessing {
             pg::SlotStatus::Rooted => {
                 let tx = client.transaction().await?;
 
-                tx.execute("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Confirmed')", &[&slot_no]).await?;
-                tx.execute("DELETE FROM slot WHERE slot < $1", &[&slot_no])
-                    .await?;
-                tx.execute("DELETE FROM account_write WHERE pubkey IN (SELECT DISTINCT pubkey FROM account_write WHERE slot = $1) AND slot < $1", &[&slot_no])
-                    .await?;
-
-                tx.execute(
+                tx.query(
+                    "UPDATE slot_history SET status = 'Rooted' WHERE slot = $1",
+                    &[&slot_no],
+                )
+                .await?;
+                tx.query(
                     "UPDATE slot SET status = 'Rooted' WHERE slot = $1",
                     &[&slot_no],
                 )
                 .await?;
-                    
+                tx.query("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Confirmed')", &[&slot_no]).await?;
+                tx.query("DELETE FROM slot WHERE slot < $1", &[&slot_no])
+                    .await?;
+                tx.query("DELETE FROM account_write WHERE pubkey IN (SELECT DISTINCT pubkey FROM account_write WHERE slot = $1) AND slot < $1", &[&slot_no])
+                    .await?;
+
                 tx.into_inner().commit().await?;
             }
         }
 
-        trace!("slot update done {}", update.slot);
+        info!("slot update done {} {:?}", update.slot, status);
         Ok(())
     }
 }
