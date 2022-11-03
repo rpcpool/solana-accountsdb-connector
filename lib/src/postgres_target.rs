@@ -217,7 +217,6 @@ impl SlotsProcessing {
                 )
                 .await?;
 
-
                 tx.execute(
                     "INSERT INTO slot(slot, parent, status) VALUES($1, $2, $3)",
                     &[&slot_no, &parent, &status],
@@ -229,7 +228,8 @@ impl SlotsProcessing {
             pg::SlotStatus::Confirmed => {
                 let tx = client.transaction().await?;
 
-                tx.execute("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Processed')", &[&slot_no]).await?;
+                // move clean up to separate process
+               // tx.execute("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Processed')", &[&slot_no]).await?;
                 tx.execute(
                     "DELETE FROM slot WHERE slot < $1 AND status = 'Processed'",
                     &[&slot_no],
@@ -252,18 +252,22 @@ impl SlotsProcessing {
             }
             pg::SlotStatus::Rooted => {
                 let tx = client.transaction().await?;
+              
+              // move clean up to separate process
+              //  tx.execute("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Confirmed')", &[&slot_no]).await?;
+              //  tx.execute("DELETE FROM account_write WHERE pubkey IN (SELECT DISTINCT pubkey FROM account_write WHERE slot = $1) AND slot < $1", &[&slot_no]).await?;
+
+                tx.execute("DELETE FROM slot WHERE slot < $1", &[&slot_no])
+                .await?;
+
+                tx.execute("UPDATE account_write SET rooted=TRUE WHERE slot=$1", &[&slot_no])
+                .await?;
 
                 tx.execute(
                     "UPDATE slot_history SET status = 'Rooted' WHERE slot = $1",
                     &[&slot_no],
                 )
                 .await?;
-
-                tx.execute("DELETE FROM account_write WHERE slot IN (SELECT slot FROM slot WHERE slot < $1 AND status = 'Confirmed')", &[&slot_no]).await?;
-                tx.execute("DELETE FROM slot WHERE slot < $1", &[&slot_no])
-                    .await?;
-                tx.execute("DELETE FROM account_write WHERE pubkey IN (SELECT DISTINCT pubkey FROM account_write WHERE slot = $1) AND slot < $1", &[&slot_no])
-                    .await?;
 
                 tx.execute(
                     "UPDATE slot SET status = 'Rooted' WHERE slot = $1",

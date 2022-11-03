@@ -27,6 +27,7 @@ CREATE TABLE account_write (
     lamports BIGINT NOT NULL,
     executable BOOL NOT NULL,
     rent_epoch BIGINT NOT NULL,
+    rooted BOOL NOT NULL,
     data BYTEA,
     PRIMARY KEY (pubkey, slot, owner)
 )
@@ -49,9 +50,9 @@ create index owner_idx on account_write_tokenkeg (substring(data,33,32));
 -- Substring index on offset 1 with length 32 (bytes) == Mint field for Tokenkeg
 create index mint_idx on account_write_tokenkeg (substring(data,1,32));
 
-
 CREATE INDEX account_write_owner_slot on account_write(owner, slot DESC);
 CREATE INDEX account_write_slot_owner on account_write(slot, owner);
+CREATE INDEX account_write_owner_rooted on account_write(owner, rooted)
 
 -- The table storing slot information
 CREATE TABLE slot (
