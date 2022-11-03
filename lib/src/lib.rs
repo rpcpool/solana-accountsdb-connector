@@ -183,7 +183,7 @@ impl AccountTable for RawAccountTable {
                 UPDATE SET
                     is_selected = $is_selected, lamports = $lamports, 
                     executable = $executable , rent_epoch = $rent_epoch, 
-                    data = $data, write_version= $write_version, is_rooted=$is_rooted",
+                    data = $data, write_version= $write_version, rooted=$is_rooted",
             pubkey,
             slot,
             is_selected,
