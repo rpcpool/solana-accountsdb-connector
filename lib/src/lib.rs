@@ -174,7 +174,7 @@ impl AccountTable for RawAccountTable {
         let query = postgres_query::query!(
             "INSERT INTO account_write
                     (pubkey, slot, is_selected,
-                    owner, lamports, executable, rent_epoch, data, write_version)
+                    owner, lamports, executable, rent_epoch, data, write_version, rooted)
                 VALUES
                 ($pubkey, $slot, $is_selected,
                 $owner, $lamports, $executable, $rent_epoch, $data, $write_version, $is_rooted)
