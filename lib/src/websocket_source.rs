@@ -150,7 +150,7 @@ pub async fn process_events(
                 let account: Account = update.value.account.decode().unwrap();
                 let pubkey = Pubkey::from_str(&update.value.pubkey).unwrap();
                 account_write_queue_sender
-                    .send(AccountWrite::from(pubkey, update.context.slot, 0, account))
+                    .send(AccountWrite::from(pubkey, update.context.slot, 0, account, false))
                     .await
                     .expect("send success");
             }
@@ -160,7 +160,7 @@ pub async fn process_events(
                     let account: Account = keyed_account.account.decode().unwrap();
                     let pubkey = Pubkey::from_str(&keyed_account.pubkey).unwrap();
                     account_write_queue_sender
-                        .send(AccountWrite::from(pubkey, update.context.slot, 0, account))
+                        .send(AccountWrite::from(pubkey, update.context.slot, 0, account, true))
                         .await
                         .expect("send success");
                 }

@@ -357,6 +357,7 @@ pub async fn process_events(
                                 rent_epoch: update.rent_epoch,
                                 data: update.data,
                                 is_selected: update.is_selected,
+                                is_rooted: false,
                             })
                             .await
                             .expect("send success");
@@ -401,7 +402,7 @@ pub async fn process_events(
                     let account: Account = keyed_account.account.decode().unwrap();
                     let pubkey = Pubkey::from_str(&keyed_account.pubkey).unwrap();
                     account_write_queue_sender
-                        .send(AccountWrite::from(pubkey, update.context.slot, 0, account))
+                        .send(AccountWrite::from(pubkey, update.context.slot, 0, account, true))
                         .await
                         .expect("send success");
                 }

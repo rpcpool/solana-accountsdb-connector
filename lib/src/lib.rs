@@ -38,10 +38,11 @@ pub struct AccountWrite {
     pub rent_epoch: u64,
     pub data: Vec<u8>,
     pub is_selected: bool,
+    pub is_rooted: bool,
 }
 
 impl AccountWrite {
-    fn from(pubkey: Pubkey, slot: u64, write_version: u64, account: Account) -> AccountWrite {
+    fn from(pubkey: Pubkey, slot: u64, write_version: u64, account: Account, is_rooted: bool) -> AccountWrite {
         AccountWrite {
             pubkey,
             slot,
@@ -52,6 +53,7 @@ impl AccountWrite {
             rent_epoch: account.rent_epoch,
             data: account.data,
             is_selected: true,
+            is_rooted: is_rooted,
         }
     }
 }
@@ -166,6 +168,7 @@ impl AccountTable for RawAccountTable {
         let executable = account_write.executable;
         let is_selected = account_write.is_selected;
         let write_version = account_write.write_version as i64;
+        let is_rooted = account_write.is_rooted;
 
         // TODO: should update for same write_version to work with websocket input
         let query = postgres_query::query!(
@@ -174,13 +177,13 @@ impl AccountTable for RawAccountTable {
                     owner, lamports, executable, rent_epoch, data, write_version)
                 VALUES
                 ($pubkey, $slot, $is_selected,
-                $owner, $lamports, $executable, $rent_epoch, $data, $write_version)
+                $owner, $lamports, $executable, $rent_epoch, $data, $write_version, $is_rooted)
                 ON CONFLICT (pubkey, slot, owner)
                 DO 
                 UPDATE SET
                     is_selected = $is_selected, lamports = $lamports, 
                     executable = $executable , rent_epoch = $rent_epoch, 
-                    data = $data, write_version= $write_version",
+                    data = $data, write_version= $write_version, is_rooted=$is_rooted",
             pubkey,
             slot,
             is_selected,
@@ -189,7 +192,8 @@ impl AccountTable for RawAccountTable {
             executable,
             rent_epoch,
             data,
-            write_version
+            write_version,
+            is_rooted
         );
 
         match query.execute(client).await {
