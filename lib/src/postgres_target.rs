@@ -2,7 +2,7 @@ use anyhow::Context;
 use log::*;
 use native_tls::TlsConnector;
 use postgres_native_tls::MakeTlsConnector;
-use postgres_query::query;
+use postgres_query::{ query, query_dyn };
 use std::{collections::HashMap, convert::TryFrom, time::Duration};
 
 use crate::{metrics, AccountTables, AccountWrite, PostgresConfig, SlotStatus, SlotUpdate};
@@ -474,6 +474,46 @@ pub async fn init(
         });
     }
 
+    // postgres cleanup thread
+    if config.cleanup_interval_secs > 0 {
+        let table_names: Vec<String> = account_tables
+            .iter()
+            .map(|table| table.table_name().to_string())
+            .collect();
+        let cleanup_steps = make_cleanup_steps(&table_names);
+
+        let postgres_con =
+            postgres_connection(config, metric_con_retries.clone(), metric_con_live.clone())
+                .await?;
+        let mut metric_last_cleanup =
+            metrics_sender.register_u64("postgres_cleanup_last_success_timestamp".into());
+        let mut metric_cleanup_errors =
+            metrics_sender.register_u64("postgres_cleanup_errors".into());
+        let config = config.clone();
+        tokio::spawn(async move {
+            let mut client_opt = None;
+            loop {
+                tokio::time::sleep(Duration::from_secs(config.cleanup_interval_secs)).await;
+                let client = update_postgres_client(&mut client_opt, &postgres_con, &config).await;
+
+                let mut all_successful = true;
+                for (name, cleanup_sql) in &cleanup_steps {
+                    let query = query_dyn!(&cleanup_sql).unwrap();
+                    if let Err(err) = query.execute(client).await {
+                        warn!("failed to process cleanup step {}: {:?}", name, err);
+                        metric_cleanup_errors.increment();
+                        all_successful = false;
+                    }
+                }
+                if all_successful {
+                    metric_last_cleanup.set_max(secs_since_epoch());
+                }
+            }
+        });
+    }
+
+
+
     // postgres metrics/monitoring thread
     {
         let postgres_con =
@@ -530,4 +570,21 @@ pub async fn init(
     }
 
     Ok((account_write_queue_sender, slot_queue_sender))
+}
+
+fn make_cleanup_steps(tables: &Vec<String>) -> HashMap<String, String> {
+    let mut steps = HashMap::<String, String>::new();
+
+    // Delete information about older slots
+    steps.insert(
+        "delete orphaned account writes".into(),
+        "DELETE FROM account_write WHERE rooted=false AND slot NOT IN (SELECT slot FROM slot);".into(),
+    );
+
+    steps.insert(
+        "delete old rooted account writes".into(),
+        "DELETE FROM account_write AS a WHERE rooted=true AND slot < (SELECT max(slot) FROM account_write as b WHERE b.rooted=true AND b.pubkey=a.pubkey);".into(),
+    );
+
+    steps
 }
