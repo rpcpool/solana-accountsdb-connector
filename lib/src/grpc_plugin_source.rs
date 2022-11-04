@@ -163,7 +163,7 @@ async fn feed_data_geyser(
                                 // drop data for slots that are well beyond rooted
                                 slot_pubkey_writes.retain(|&k, _| k >= max_rooted_slot - max_out_of_order_slots);
                             }
-                            if snapshot_needed && max_rooted_slot - rooted_to_finalized_slots > first_full_slot {
+                            if snapshot_needed {
                                 snapshot_needed = false;
                                 // snapshot_future = tokio::spawn(get_snapshot(snapshot_config.rpc_http_url.clone(), program_ids)).fuse();
                                 snapshot_future = future::try_join_all(program_ids.iter().copied().map(|program_id| {
