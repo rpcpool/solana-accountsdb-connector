@@ -121,8 +121,6 @@ async fn feed_data_geyser(
     // which will have "finalized" commitment.
     let mut rooted_to_finalized_slots = 30;
 
-    let mut snapshot_future = future::Fuse::terminated();
-
     // The plugin sends a ping every 5s or so
     let fatal_idle_timeout = Duration::from_secs(60);
 
@@ -144,6 +142,32 @@ async fn feed_data_geyser(
     //
     // That number will be consistent for each node.
     let mut slot_pubkey_writes = HashMap::<u64, HashMap<[u8; 32], WriteVersion>>::new();
+    let mut snapshot_future = future::try_join_all(program_ids.iter().copied().map(|program_id| {
+        get_snapshot(snapshot_config.rpc_http_url.clone(), program_id)
+    }));
+
+    for snapshot in snapshot_future.await? {
+                    if let OptionalContext::Context(snapshot_data) = snapshot {
+                        info!("snapshot is for slot {}, first full slot was {}", snapshot_data.context.slot, first_full_slot);
+                        if snapshot_data.context.slot >= first_full_slot {
+                            sender
+                            .send(Message::Snapshot(snapshot_data))
+                            .await
+                            .expect("send success");
+                        } else {
+                            info!(
+                                "snapshot is too old: has slot {}, expected {} minimum",
+                                snapshot_data.context.slot,
+                                first_full_slot
+                            );
+                            // try again in another 10 slots
+                            snapshot_needed = true;
+                            rooted_to_finalized_slots += 10;
+                        }
+                    } else {
+                        anyhow::bail!("bad snapshot format");
+                    }
+    }
 
     loop {
         tokio::select! {
@@ -162,13 +186,6 @@ async fn feed_data_geyser(
 
                                 // drop data for slots that are well beyond rooted
                                 slot_pubkey_writes.retain(|&k, _| k >= max_rooted_slot - max_out_of_order_slots);
-                            }
-                            if snapshot_needed {
-                                snapshot_needed = false;
-                                // snapshot_future = tokio::spawn(get_snapshot(snapshot_config.rpc_http_url.clone(), program_ids)).fuse();
-                                snapshot_future = future::try_join_all(program_ids.iter().copied().map(|program_id| {
-                                    get_snapshot(snapshot_config.rpc_http_url.clone(), program_id)
-                                })).fuse();
                             }
                         }
                     },
@@ -208,30 +225,7 @@ async fn feed_data_geyser(
                 }
                 sender.send(Message::GrpcUpdate(update)).await.expect("send success");
             },
-            snapshot = &mut snapshot_future => {
-                for snapshot in snapshot? {
-                    if let OptionalContext::Context(snapshot_data) = snapshot {
-                        info!("snapshot is for slot {}, first full slot was {}", snapshot_data.context.slot, first_full_slot);
-                        if snapshot_data.context.slot >= first_full_slot {
-                            sender
-                            .send(Message::Snapshot(snapshot_data))
-                            .await
-                            .expect("send success");
-                        } else {
-                            info!(
-                                "snapshot is too old: has slot {}, expected {} minimum",
-                                snapshot_data.context.slot,
-                                first_full_slot
-                            );
-                            // try again in another 10 slots
-                            snapshot_needed = true;
-                            rooted_to_finalized_slots += 10;
-                        }
-                    } else {
-                        anyhow::bail!("bad snapshot format");
-                    }
-                }
-            },
+            
             _ = tokio::time::sleep(fatal_idle_timeout) => {
                 anyhow::bail!("geyser plugin hasn't sent a message in too long");
             }
