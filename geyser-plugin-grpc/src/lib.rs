@@ -1,5 +1,5 @@
 pub mod accounts_selector;
-pub mod compression;
-pub mod geyser_plugin_grpc;
+pub mod plugin;
 pub mod prom;
+pub mod service;
 pub mod version;

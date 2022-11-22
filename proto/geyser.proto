@@ -24,6 +24,9 @@ message Update {
 }
 
 message AccountWrite {
+  // removed field `is_selected`
+  reserved 10;
+
   uint64 slot = 1;
   bytes pubkey = 2;
   uint64 lamports = 3;
@@ -34,10 +37,6 @@ message AccountWrite {
   uint64 write_version = 8;
   // Is this write part of the set of writes sent on startup?
   bool is_startup = 9;
-  // Is this write sent because it matches the connector criterion?
-  // If false, then it is sent because this address previously matched
-  // the criterion (i.e. account is closed/reused)
-  bool is_selected = 10;
 }
 
 message SlotUpdate {

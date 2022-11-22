@@ -1,6 +1,13 @@
-use {log::*, std::collections::HashSet};
+use {log::*, serde::Deserialize, std::collections::HashSet};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct AccountsSelectorConfig {
+    accounts: Vec<String>,
+    owners: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountsSelector {
     pub accounts: HashSet<Vec<u8>>,
     pub owners: HashSet<Vec<u8>>,
@@ -18,7 +25,11 @@ impl Default for AccountsSelector {
 }
 
 impl AccountsSelector {
-    pub fn new(accounts: &[&str], owners: &[&str]) -> anyhow::Result<Self> {
+    pub fn new<T1, T2>(accounts: &[T1], owners: &[T2]) -> anyhow::Result<Self>
+    where
+        for<'a> T1: AsRef<[u8]> + std::cmp::PartialEq<&'a str> + std::fmt::Debug,
+        T2: AsRef<[u8]> + std::fmt::Debug,
+    {
         info!(
             "Creating AccountsSelector from accounts: {:?}, owners: {:?}",
             accounts, owners
@@ -42,6 +53,10 @@ impl AccountsSelector {
         })
     }
 
+    pub fn from_config(config: &AccountsSelectorConfig) -> anyhow::Result<AccountsSelector> {
+        Self::new(&config.accounts, &config.owners)
+    }
+
     pub fn is_account_selected(&self, account: &[u8], owner: &[u8]) -> bool {
         self.select_all_accounts || self.accounts.contains(account) || self.owners.contains(owner)
     }
@@ -49,12 +64,20 @@ impl AccountsSelector {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
+    use super::{AccountsSelector, AccountsSelectorConfig};
 
     #[test]
     fn test_create_accounts_selector() {
-        AccountsSelector::new(&["9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"], &[]).unwrap();
+        assert!(AccountsSelector::from_config(&AccountsSelectorConfig {
+            accounts: vec!["9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin".to_owned()],
+            owners: vec![],
+        })
+        .is_ok());
 
-        AccountsSelector::new(&[], &["9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"]).unwrap();
+        assert!(AccountsSelector::from_config(&AccountsSelectorConfig {
+            accounts: vec![],
+            owners: vec!["9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin".to_owned()],
+        })
+        .is_ok());
     }
 }
